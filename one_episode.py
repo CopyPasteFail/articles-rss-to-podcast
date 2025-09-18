@@ -54,15 +54,21 @@ def select_entry():
         target = p.entries[0]
     return feed_entry_to_meta(target)
 
+def normalize_text(text: str) -> str:
+    return re.sub("<.*?>", "", text or "")
+
+
 def render_ssml(meta):
-    # very simple SSML. You can customize per language per feed
+    """Return SSML payload and character count for billing approximation."""
     title = meta["title"]
-    summary = re.sub("<.*?>", "", meta["summary"] or "")
+    summary = normalize_text(meta["summary"])
     ssml = f"""<speak>
 <p>{title}</p>
 <p>{summary}</p>
 </speak>"""
-    return ssml
+    plain_text = f"{title}\n{summary}".strip()
+    char_count = len(plain_text)
+    return ssml, char_count
 
 def synthesize_ssml(ssml, out_path: pathlib.Path):
     client = texttospeech.TextToSpeechClient()
@@ -110,13 +116,17 @@ def main():
     mp3_name = f"{ts}-{slug}.mp3"
     mp3_path = OUT / mp3_name
 
+    ssml, char_count = render_ssml({"title": e["title"], "summary": e["summary"]})
+
+    generated = False
     if mp3_path.exists():
         print(f"Exists, skipping TTS: {mp3_path}")
     else:
-        ssml = render_ssml({"title": e["title"], "summary": e["summary"]})
         synthesize_ssml(ssml, mp3_path)
         normalize_mp3(mp3_path)
         print(f"Wrote {mp3_path}")
+        generated = True
+        print(f"Characters billed (approx): {char_count}")
 
     sidecar = mp3_path.with_suffix(".mp3.rssmeta.json")
     side = {
@@ -127,6 +137,8 @@ def main():
         "article_pub_utc": e["pub_utc"],
         "mp3_filename": mp3_name,
         "mp3_local_path": str(mp3_path),
+        "tts_characters": char_count,
+        "tts_generated": generated,
     }
     with sidecar.open("w", encoding="utf-8") as f:
         json.dump(side, f, ensure_ascii=False, indent=2)

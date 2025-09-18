@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import os, sys, json, hashlib, pathlib, subprocess, datetime, shutil, requests
+import os, sys, json, hashlib, pathlib, subprocess, datetime, shutil, requests, re
 
 ROOT = pathlib.Path(__file__).resolve().parent
 OUT  = pathlib.Path(os.getenv("OUT_DIR", "./out")).resolve()
@@ -8,7 +8,7 @@ PUBLIC = (ROOT / "public").resolve()
 PY = sys.executable
 
 # Cloudflare vars
-CF_ACCOUNT_ID = os.getenv("CF_ACCOUNT_ID", "").strip()
+CF_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip()
 CF_API_TOKEN  = os.getenv("CLOUDFLARE_API_TOKEN", "").strip()
 CF_PAGES_PROJECT = os.getenv("CF_PAGES_PROJECT", "tts-podcast-feeds").strip()
 CF_KV_NAMESPACE_ID = os.getenv("CF_KV_NAMESPACE_ID", "").strip()
@@ -17,7 +17,7 @@ CF_KV_NAMESPACE_NAME = os.getenv("CF_KV_NAMESPACE_NAME", "tts-podcast-state").st
 SLUG = os.getenv("PODCAST_SLUG", "default").strip()
 RSS_URL = os.getenv("RSS_URL", "").strip()
 
-def sh(*args, env=None):
+def sh(*args, env=None, cwd=None):
     print("→", " ".join(map(str, args)))
     try:
         out = subprocess.check_output(
@@ -25,12 +25,22 @@ def sh(*args, env=None):
             text=True,
             stderr=subprocess.STDOUT,
             env=env,
+            cwd=cwd,
         )
         print(out.strip())
         return out
     except subprocess.CalledProcessError as e:
         print(e.output.strip())
         raise
+
+
+def git_info():
+    try:
+        branch = sh("git", "rev-parse", "--abbrev-ref", "HEAD", cwd=str(ROOT)).strip()
+        commit = sh("git", "rev-parse", "HEAD", cwd=str(ROOT)).strip()
+        return branch, commit
+    except Exception:
+        return None, None
 
 # ---------- Cloudflare KV helpers ----------
 def _kv_base():
@@ -165,6 +175,7 @@ def main():
     state_key = f"feed:{SLUG}"
     state = kv_get(state_key) or {}
     items = state.setdefault("items", {})
+    usage = state.setdefault("usage", {"cumulative_characters": 0})
 
     entries = fetch_entries_from_rss()
     if not entries:
@@ -178,6 +189,14 @@ def main():
     gcp_ready = False
     feed_updated = False
     processed = False
+    run_characters = 0
+    monthly_limit = int(os.getenv("TTS_MONTHLY_FREE_CHAR_LIMIT", "1000000"))
+
+    def estimate_characters(meta_like):
+        summary = meta_like.get("article_summary") or ""
+        summary_clean = re.sub("<.*?>", "", summary)
+        plain = f"{meta_like.get('article_title','')}\n{summary_clean}".strip()
+        return len(plain)
 
     for entry in entries:
         link = entry.get("article_link")
@@ -203,6 +222,7 @@ def main():
         entry_state.setdefault("article_title", entry["article_title"])
         entry_state.setdefault("article_link", link)
         entry_state.setdefault("article_pub_utc", entry["article_pub_utc"])
+        entry_state.setdefault("tts_characters", estimate_characters(entry))
 
         ia_present = ia_has_episode_http(identifier)
         last_pub = entry_state.get("last_pub_utc")
@@ -231,6 +251,8 @@ def main():
                 "mp3_local_path": "",
                 "mp3_filename": "episode.mp3",
                 "generated_il_iso": "",
+                "tts_characters": entry_state.get("tts_characters", estimate_characters(entry)),
+                "tts_generated": False,
             }
             with sidecar_path.open("w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -280,6 +302,12 @@ def main():
         with open(sidecar_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
 
+        generated_this_run = meta.get("tts_generated", True)
+        char_count = meta.get("tts_characters")
+        if char_count is None:
+            char_count = estimate_characters(entry)
+        entry_state["tts_characters"] = char_count
+
         print("  → Uploading to Internet Archive")
         out2 = sh(PY, str(ROOT / "upload_to_ia.py"), meta["mp3_local_path"])
         ia_url = None
@@ -308,6 +336,9 @@ def main():
                 "article_pub_utc": entry["article_pub_utc"],
             }
         )
+        if generated_this_run:
+            usage["cumulative_characters"] = usage.get("cumulative_characters", 0) + char_count
+            run_characters += char_count
         update_latest_state_snapshot(state)
         kv_put(state_key, state)
 
@@ -319,6 +350,18 @@ def main():
     if not processed:
         print("No pending entries - everything up to date")
 
+    if run_characters:
+        cumulative = usage.get("cumulative_characters", 0)
+        pct = (cumulative / monthly_limit * 100) if monthly_limit else 0
+        print("\n[TTS usage]")
+        print(f"  This run: {run_characters:,} characters")
+        print(f"  Recorded total: {cumulative:,} / {monthly_limit:,} characters (~{pct:.1f}% of free tier)")
+    else:
+        cumulative = usage.get("cumulative_characters", 0)
+        print("\n[TTS usage]")
+        print(f"  This run: 0 characters (no new synthesis)")
+        print(f"  Recorded total: {cumulative:,} characters")
+
     if feed_updated:
         deploy_pages()
 
@@ -327,7 +370,21 @@ def deploy_pages():
     if CF_API_TOKEN and CF_ACCOUNT_ID and CF_PAGES_PROJECT:
         if shutil.which("wrangler"):
             try:
-                sh("wrangler","pages","deploy","public","--project-name",CF_PAGES_PROJECT)
+                deploy_args = [
+                    "wrangler","pages","deploy","public",
+                    "--project-name",CF_PAGES_PROJECT,
+                    "--commit-dirty=true",
+                ]
+                env_branch = os.getenv("CF_PAGES_BRANCH") or os.getenv("CF_PAGES_PROD_BRANCH")
+                env_commit = os.getenv("CF_PAGES_COMMIT")
+                git_branch, git_commit = git_info()
+                branch = env_branch or git_branch
+                commit = env_commit or git_commit
+                if branch:
+                    deploy_args.extend(["--branch", branch])
+                if commit:
+                    deploy_args.extend(["--commit-hash", commit])
+                sh(*deploy_args)
                 print("Cloudflare Pages deploy OK")
             except Exception as e:
                 print(f"Wrangler deploy failed: {e}")
