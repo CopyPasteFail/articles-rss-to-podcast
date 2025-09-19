@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 import os, sys, json, hashlib, pathlib, subprocess, datetime, shutil, requests, re
 
+from content_utils import resolve_article_content, text_to_html
+
 ROOT = pathlib.Path(__file__).resolve().parent
 OUT  = pathlib.Path(os.getenv("OUT_DIR", "./out")).resolve()
 PUBLIC = (ROOT / "public").resolve()
@@ -119,7 +121,10 @@ def ia_has_episode_http(identifier: str) -> bool:
 def _entry_from_feed(e):
     link = getattr(e, "link", None) or getattr(e, "id", None)
     title = getattr(e, "title", link)
-    summary = getattr(e, "summary", "") or getattr(e, "description", "") or ""
+    plain_text, html_content, subtitle = resolve_article_content(e, link, allow_fetch=False)
+    summary = plain_text or getattr(e, "summary", "") or getattr(e, "description", "") or ""
+    if not html_content and summary:
+        html_content = text_to_html(summary)
     tstruct = getattr(e, "published_parsed", None) or getattr(e, "updated_parsed", None)
     if tstruct:
         pub_utc = datetime.datetime(*tstruct[:6], tzinfo=datetime.timezone.utc).isoformat()
@@ -129,6 +134,8 @@ def _entry_from_feed(e):
     return {
         "article_title": title,
         "article_summary": summary,
+        "article_summary_html": html_content,
+        "article_subtitle": subtitle,
         "article_link": link,
         "article_author": author,
         "article_pub_utc": pub_utc,
@@ -195,7 +202,9 @@ def main():
     def estimate_characters(meta_like):
         summary = meta_like.get("article_summary") or ""
         summary_clean = re.sub("<.*?>", "", summary)
-        plain = f"{meta_like.get('article_title','')}\n{summary_clean}".strip()
+        subtitle = meta_like.get("article_subtitle") or ""
+        parts = [meta_like.get("article_title", ""), subtitle, summary_clean]
+        plain = "\n".join([p for p in parts if p]).strip()
         return len(plain)
 
     for entry in entries:
@@ -223,6 +232,9 @@ def main():
         entry_state.setdefault("article_link", link)
         entry_state.setdefault("article_pub_utc", entry["article_pub_utc"])
         entry_state.setdefault("tts_characters", estimate_characters(entry))
+        entry_state["article_summary"] = entry["article_summary"]
+        entry_state["article_summary_html"] = entry.get("article_summary_html", "")
+        entry_state["article_subtitle"] = entry.get("article_subtitle", "")
 
         ia_present = ia_has_episode_http(identifier)
         last_pub = entry_state.get("last_pub_utc")
@@ -264,6 +276,9 @@ def main():
                     "rss_added": True,
                     "last_pub_utc": entry["article_pub_utc"],
                     "article_pub_utc": entry["article_pub_utc"],
+                    "article_subtitle": entry.get("article_subtitle", ""),
+                    "article_summary": entry.get("article_summary", ""),
+                    "article_summary_html": entry.get("article_summary_html", ""),
                 }
             )
             update_latest_state_snapshot(state)
@@ -307,6 +322,9 @@ def main():
         if char_count is None:
             char_count = estimate_characters(entry)
         entry_state["tts_characters"] = char_count
+        entry_state["article_subtitle"] = meta.get("article_subtitle", entry.get("article_subtitle", ""))
+        entry_state["article_summary"] = meta.get("article_summary", entry.get("article_summary", ""))
+        entry_state["article_summary_html"] = meta.get("article_summary_html", entry.get("article_summary_html", ""))
 
         print("  → Uploading to Internet Archive")
         out2 = sh(PY, str(ROOT / "upload_to_ia.py"), meta["mp3_local_path"])
@@ -334,6 +352,9 @@ def main():
                 "rss_added": True,
                 "last_pub_utc": entry["article_pub_utc"],
                 "article_pub_utc": entry["article_pub_utc"],
+                "article_subtitle": meta.get("article_subtitle", entry.get("article_subtitle", "")),
+                "article_summary": meta.get("article_summary", entry.get("article_summary", "")),
+                "article_summary_html": meta.get("article_summary_html", entry.get("article_summary_html", "")),
             }
         )
         if generated_this_run:

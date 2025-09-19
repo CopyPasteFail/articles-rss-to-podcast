@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import os, sys, json, hashlib, datetime, email.utils, pathlib, xml.etree.ElementTree as ET, requests
+import os, sys, json, hashlib, datetime, email.utils, pathlib, xml.etree.ElementTree as ET, requests, html
 from zoneinfo import ZoneInfo
 from feedgen.feed import FeedGenerator
 
@@ -71,9 +71,21 @@ def add_item(feed_path, channel_meta, ep, keep_last=200):
 
     fe = fg.add_entry()
     fe.title(ep["article_title"])
-    full_desc = ep.get("article_summary") or ""
-    if ep.get("article_link"): full_desc += f"\nOriginal: {ep['article_link']}"
-    fe.description(full_desc.strip() or ep["article_title"])
+    full_desc_html = ep.get("article_summary_html") or ""
+    subtitle = ep.get("article_subtitle") or ""
+    if full_desc_html:
+        if subtitle:
+            full_desc_html = f"<p><strong>{html.escape(subtitle)}</strong></p>" + full_desc_html
+        if ep.get("article_link"):
+            full_desc_html += f"<p>Original: <a href=\"{ep['article_link']}\">{ep['article_link']}</a></p>"
+        fe.description(full_desc_html.strip())
+    else:
+        full_desc = ep.get("article_summary") or ""
+        if subtitle:
+            full_desc = f"{subtitle}\n\n{full_desc}" if full_desc else subtitle
+        if ep.get("article_link"):
+            full_desc += f"\nOriginal: {ep['article_link']}"
+        fe.description(full_desc.strip() or ep["article_title"])
     try:
         pub_dt = datetime.datetime.fromisoformat(ep["article_pub_utc"])
     except Exception:
