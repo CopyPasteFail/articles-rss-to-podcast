@@ -183,6 +183,7 @@ def main():
     state = kv_get(state_key) or {}
     items = state.setdefault("items", {})
     usage = state.setdefault("usage", {"cumulative_characters": 0})
+    state.setdefault("pending_deploy", False)
 
     entries = fetch_entries_from_rss()
     if not entries:
@@ -281,6 +282,7 @@ def main():
                     "article_summary_html": entry.get("article_summary_html", ""),
                 }
             )
+            state["pending_deploy"] = True
             update_latest_state_snapshot(state)
             kv_put(state_key, state)
 
@@ -360,6 +362,7 @@ def main():
         if generated_this_run:
             usage["cumulative_characters"] = usage.get("cumulative_characters", 0) + char_count
             run_characters += char_count
+        state["pending_deploy"] = True
         update_latest_state_snapshot(state)
         kv_put(state_key, state)
 
@@ -383,8 +386,25 @@ def main():
         print(f"  This run: 0 characters (no new synthesis)")
         print(f"  Recorded total: {cumulative:,} characters")
 
-    if feed_updated:
-        deploy_pages()
+    pending_deploy = state.get("pending_deploy", False)
+    deploy_needed = feed_updated or pending_deploy
+
+    if deploy_needed:
+        if not feed_updated and pending_deploy:
+            print("Feed unchanged but pending deploy exists; retrying deploy")
+        ran, success = deploy_pages()
+        if ran and success:
+            state["pending_deploy"] = False
+            kv_put(state_key, state)
+        else:
+            state["pending_deploy"] = True
+            kv_put(state_key, state)
+            if ran:
+                print("Deploy failed; will retry on next run")
+            else:
+                print("Deploy skipped (missing configuration); will retry when ready")
+    else:
+        print("Feed unchanged; skipping deploy")
 
 def deploy_pages():
     # Optional automatic deploy to Cloudflare Pages with Wrangler
@@ -407,12 +427,17 @@ def deploy_pages():
                     deploy_args.extend(["--commit-hash", commit])
                 sh(*deploy_args)
                 print("Cloudflare Pages deploy OK")
+                return True, True
             except Exception as e:
                 print(f"Wrangler deploy failed: {e}")
+                return True, False
         else:
             print("Wrangler not in PATH, skipping deploy")
+            return False, False
     else:
         print("CF Pages env not set, skipping deploy")
+        return False, False
+
 
 if __name__ == "__main__":
     main()
