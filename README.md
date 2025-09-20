@@ -265,7 +265,7 @@ Reference material:
 
 ## Feed configuration
 
-Create one config per feed in `configs/`. Example `configs/geektime.env`:
+Create one config per feed in `configs/`. You can start by duplicating `configs/geektime.env` and editing it (or use the snippet below as a reference):
 
 ```bash
 # Source RSS
@@ -331,12 +331,17 @@ API reference: https://developers.cloudflare.com/api/resources/cache/methods/pur
 
 **Windows Task Scheduler** via WSL:
 
-```bat
-wsl.exe bash -lc "cd /mnt/c/Users/<you>/articles-rss-to-podcast && \
-source .venv/bin/activate && \
-python run_feed.py geektime && \
-wrangler pages deploy public --project-name tts-podcast-feeds"
-```
+1. Create a batch file (for example `run_feed_geektime.bat`) with the following content:
+
+   ```bat
+   @echo off
+   wsl.exe -u <WSL_USER> bash -lic "cd /home/<WSL_USER>/path/to/repo && source .venv/bin/activate && python run_feed.py geektime"
+   pause
+   ```
+
+   Replace `<WSL_USER>` and `/home/<WSL_USER>/path/to/repo` with your actual WSL username and project path.
+
+2. In Task Scheduler, create a basic task that runs this batch file on the cadence you prefer.
 
 ---
 
@@ -404,6 +409,6 @@ These change over time. Always check the official pages.
 
 ## Security notes
 
-- Do not commit secrets. Add `.env` and `tts-sa.json` to `.gitignore`.
+- Do not commit secrets.  `.env` and `tts-sa.json` are excluded in `.gitignore`.
 - Use a narrow Cloudflare API token. Do not use the Global API Key unless required.
 - Rotate tokens and IA keys on a schedule.
