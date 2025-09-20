@@ -6,17 +6,17 @@ Create a podcast from any article RSS feed. This repo fetches new items from a s
 
 ## Contents
 
-- Quick start
-- How it works
-- One-time setup: GCP, Internet Archive, Cloudflare Pages and KV
-- Project configuration
-- Run a feed
-- Automation (cron and Windows Task Scheduler)
-- Caching strategy and "instant update" via purge
-- Free tier limits and pricing links
-- Troubleshooting
-- FAQ
-- Security notes
+- [Quick start](#quick-start)
+- [How it works](#how-it-works)
+- [One-time setup](#one-time-setup)
+- [Feed configuration](#feed-configuration)
+- [Run a feed](#run-a-feed)
+- [Automation](#automation)
+- [Caching and "instant update"](#caching-and-instant-update)
+- [Free tier limits and pricing links](#free-tier-limits-and-pricing-links)
+- [Troubleshooting](#troubleshooting)
+- [FAQ](#faq)
+- [Security notes](#security-notes)
 
 ---
 
@@ -63,20 +63,25 @@ The resulting RSS is served under `https://<your-pages-domain>/feeds/<slug>.xml`
 7. Deploy `public/` to Cloudflare Pages.
 8. Optionally purge the single feed URL so clients see the update immediately.
 
-Folder structure:
+Folder structure (key files):
 
 ```
-public/
-  feeds/
-    <slug>.xml         # generated podcast feed(s)
-configs/
-  <slug>.env           # one file per feed
-content_utils.py       # HTML -> clean text helpers
-one_episode.py         # build a single episode from an article
-write_rss.py           # write or update RSS XML
-upload_to_ia.py        # Internet Archive uploads
-pipeline.py            # orchestrates the end-to-end flow
-run_feed.py            # CLI entry point: python run_feed.py <slug>
+.
+├── configs/
+│   └── <slug>.env           # per-feed settings (copy geektime.env)
+├── public/
+│   ├── _headers             # HTTP headers for feeds
+│   └── feeds/
+│       └── <slug>.xml       # generated podcast feed(s)
+├── out/                     # working artifacts & sidecars
+├── content_utils.py         # HTML -> clean text helpers
+├── one_episode.py           # build a single episode from an article
+├── pipeline.py              # orchestrates the end-to-end flow
+├── run_feed.py              # CLI entry point
+├── upload_to_ia.py          # Internet Archive uploads
+├── write_rss.py             # write or update RSS XML
+├── requirements.txt         # Python dependencies
+└── .env.example             # template for root configuration
 ```
 
 ---
@@ -265,7 +270,7 @@ Reference material:
 
 ## Feed configuration
 
-Create one config per feed in `configs/`. You can start by duplicating `configs/geektime.env` and editing it (or use the snippet below as a reference). Most commands in this guide use the Geektime feed for illustration—swap in your own filename/slug whenever you create or run a different feed:
+Create one config per feed in `configs/`. You can start by duplicating `configs/geektime.env` and editing it (or use the snippet below as a reference). Most commands in this guide use the Geektime feed for illustration - swap in your own filename/slug whenever you create or run a different feed:
 
 ```bash
 # Source RSS
