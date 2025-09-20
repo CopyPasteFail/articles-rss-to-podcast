@@ -165,15 +165,35 @@ gcloud iam service-accounts keys create ./tts-key.json \
 ```
 
 Update your `.env` (copied from `.env.example`) so `GOOGLE_APPLICATION_CREDENTIALS` targets `./tts-key.json`.
+These commands assume a service account called `tts-runner` and that the key file lives at `./tts-key.json`. If you pick a different name or location, update the matching values in `.env` (and anywhere else the path is referenced).
 
 
 ### C) Create your .env from the template
 
-Copy the example file and edit it with the credentials you collected above:
+Copy the example file, then populate the shared secrets (values shown here are placeholders—replace them with your real credentials):
 
 ```bash
 cp .env.example .env
 $EDITOR .env
+```
+
+```bash
+# Google Cloud
+GOOGLE_APPLICATION_CREDENTIALS=./tts-key.json
+
+# Internet Archive
+IA_ACCESS_KEY=your_ia_access_key
+IA_SECRET_KEY=your_ia_secret_key
+
+# Cloudflare
+CLOUDFLARE_API_TOKEN=your_cf_api_token
+CLOUDFLARE_ACCOUNT_ID=your_cf_account_id
+CF_PAGES_PROJECT=tts-podcast-feeds
+CF_KV_NAMESPACE_NAME=tts-podcast-state
+CF_KV_NAMESPACE_ID=your_kv_namespace_id
+
+# Defaults
+OUT_DIR=./out
 ```
 
 Helpful references:
@@ -233,13 +253,7 @@ Documentation:
 
 6. (Optional) Configure cache purge if you use a custom domain: note your Zone ID from the dashboard.
 
-7. Add feed-friendly headers in `public/_headers` so Pages serves real RSS:
 
-   ```
-   /feeds/*.xml
-     Content-Type: application/rss+xml; charset=utf-8
-     Cache-Control: public, max-age=300
-   ```
 
 Reference material:
 - Direct Upload docs: https://developers.cloudflare.com/pages/get-started/direct-upload/
