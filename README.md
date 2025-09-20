@@ -265,7 +265,7 @@ Reference material:
 
 ## Feed configuration
 
-Create one config per feed in `configs/`. You can start by duplicating `configs/geektime.env` and editing it (or use the snippet below as a reference):
+Create one config per feed in `configs/`. You can start by duplicating `configs/geektime.env` and editing it (or use the snippet below as a reference). Most commands in this guide use the Geektime feed for illustration—swap in your own filename/slug whenever you create or run a different feed:
 
 ```bash
 # Source RSS
