@@ -159,18 +159,6 @@ Generate & publish one feed:
 python run_feed.py geektime
 ```
 
-> **Windows PowerShell tip:** When launching the pipeline from PowerShell via WSL, load NVM so Wrangler stays on the PATH:
->
-> ```powershell
-> wsl bash -lc '
->   source ~/.nvm/nvm.sh &&
->   cd <path-to-repo> &&
->   source .venv/bin/activate &&
->   python run_feed.py geektime
-> '
-> ```
-> Replace `<path-to-repo>` with the repository path inside WSL (e.g. `~/rss-to-tts`).
-
 ### What happens:
 1. Fetch latest article from the RSS.  
 2. Check Cloudflare KV to see if it’s already processed.  
@@ -210,17 +198,19 @@ Paste this into any podcast app (Apple Podcasts, Pocket Casts, Overcast, etc.).
 
 ## 7. Automation
 
-### Windows Task Scheduler (via WSL)
+### Windows Task Scheduler (using CMD to call the script via WSL)
 Create a task that runs daily:
 
 ```
-wsl.exe -e bash -lc 'cd ~/rss-to-tts && source .venv/bin/activate && python run_feed.py geektime'
+wsl.exe bash -lic "cd /path/to/repo && source .venv/bin/activate && python run_feed.py geektime"
 ```
 
 ### Linux/macOS cron
 ```cron
-0 8 * * * cd ~/rss-to-tts && source .venv/bin/activate && python run_feed.py geektime
+0 8 * * * cd /path/to/repo && source .venv/bin/activate && python run_feed.py geektime
 ```
+
+> Replace `/path/to/repo` with the repository path inside WSL (e.g. `~/repos/rss-to-tts`).
 
 ---
 
