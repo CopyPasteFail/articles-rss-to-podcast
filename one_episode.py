@@ -30,7 +30,7 @@ def feed_entry_to_meta(e, *, allow_fetch=False):
         pub_utc = datetime.datetime(*tstruct[:6], tzinfo=datetime.timezone.utc).isoformat()
     else:
         pub_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    plain_text, html_content, subtitle = resolve_article_content(e, link, allow_fetch=allow_fetch)
+    plain_text, html_content, subtitle, lead_image = resolve_article_content(e, link, allow_fetch=allow_fetch)
     if not plain_text:
         plain_text = getattr(e, "summary", "") or getattr(e, "description", "") or title
     if not html_content and plain_text:
@@ -43,6 +43,7 @@ def feed_entry_to_meta(e, *, allow_fetch=False):
         "article_text": plain_text,
         "article_html": html_content,
         "article_subtitle": subtitle,
+        "article_image_url": lead_image,
         "author": author,
         "pub_utc": pub_utc,
     }
@@ -263,6 +264,7 @@ def main():
         "article_link": e["link"],
         "article_author": e["author"],
         "article_pub_utc": e["pub_utc"],
+        "article_image_url": e.get("article_image_url", ""),
         "mp3_filename": mp3_name,
         "mp3_local_path": str(mp3_path),
         "tts_characters": char_count,

@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import os, sys, json, hashlib, datetime, email.utils, pathlib, xml.etree.ElementTree as ET, requests, html
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 from feedgen.feed import FeedGenerator
 
@@ -30,6 +31,18 @@ def ensure_base_feed(feed_path, title, site, desc, author_name, author_email, im
     fg.podcast.itunes_category('News')
     fg.rss_file(feed_path, pretty=True)
 
+ITUNES_NS = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
+
+
+def _valid_itunes_image(url: str | None) -> bool:
+    if not url:
+        return False
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    return parsed.path.lower().endswith((".jpg", ".png"))
+
+
 def add_item(feed_path, channel_meta, ep, keep_last=200):
     items = []
     if os.path.exists(feed_path):
@@ -43,7 +56,13 @@ def add_item(feed_path, channel_meta, ep, keep_last=200):
             link = enc.get("url") if enc is not None else None
             length = enc.get("length") if enc is not None else None
             guid = it.findtext("guid")
-            items.append((title, desc, link, pub, length, guid))
+            image_el = it.find(f"{ITUNES_NS}image")
+            image_url = ""
+            if image_el is not None:
+                image_url = image_el.get("href") or (image_el.text or "")
+            if not _valid_itunes_image(image_url):
+                image_url = ""
+            items.append((title, desc, link, pub, length, guid, image_url))
 
     fg = FeedGenerator()
     fg.load_extension('podcast')
@@ -61,13 +80,17 @@ def add_item(feed_path, channel_meta, ep, keep_last=200):
         fg.podcast.itunes_image(channel_meta["image"])
     fg.podcast.itunes_category('News')
 
-    for t, d, l, p, ln, g in items[:keep_last]:
+    channel_has_image = bool(channel_meta.get("image"))
+
+    for t, d, l, p, ln, g, img in items[:keep_last]:
         fe = fg.add_entry()
         fe.title(t or "")
         fe.description(d or "")
         if p: fe.pubDate(p)
         if l: fe.enclosure(l, str(ln or 0), 'audio/mpeg')
         if g: fe.guid(g, permalink=False)
+        if not channel_has_image and _valid_itunes_image(img):
+            fe.podcast.itunes_image(img)
 
     fe = fg.add_entry()
     fe.title(ep["article_title"])
@@ -94,6 +117,10 @@ def add_item(feed_path, channel_meta, ep, keep_last=200):
     size = get_len(ep["audio_url"]) or 0
     fe.enclosure(ep["audio_url"], str(size), "audio/mpeg")
     fe.guid(hashlib.sha1((ep["audio_url"] + ep.get("article_link","")).encode("utf-8")).hexdigest(), permalink=False)
+    if not channel_has_image:
+        episode_img = ep.get("article_image_url") or ""
+        if _valid_itunes_image(episode_img):
+            fe.podcast.itunes_image(episode_img)
 
     pathlib.Path(feed_path).parent.mkdir(parents=True, exist_ok=True)
     fg.rss_file(feed_path, pretty=True)

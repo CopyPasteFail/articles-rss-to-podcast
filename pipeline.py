@@ -121,7 +121,7 @@ def ia_has_episode_http(identifier: str) -> bool:
 def _entry_from_feed(e):
     link = getattr(e, "link", None) or getattr(e, "id", None)
     title = getattr(e, "title", link)
-    plain_text, html_content, subtitle = resolve_article_content(e, link, allow_fetch=False)
+    plain_text, html_content, subtitle, lead_image = resolve_article_content(e, link, allow_fetch=False)
     summary = plain_text or getattr(e, "summary", "") or getattr(e, "description", "") or ""
     if not html_content and summary:
         html_content = text_to_html(summary)
@@ -139,6 +139,7 @@ def _entry_from_feed(e):
         "article_link": link,
         "article_author": author,
         "article_pub_utc": pub_utc,
+        "article_image_url": lead_image,
     }
 
 
@@ -236,6 +237,7 @@ def main():
         entry_state["article_summary"] = entry["article_summary"]
         entry_state["article_summary_html"] = entry.get("article_summary_html", "")
         entry_state["article_subtitle"] = entry.get("article_subtitle", "")
+        entry_state["article_image_url"] = entry.get("article_image_url", "")
 
         ia_present = ia_has_episode_http(identifier)
         last_pub = entry_state.get("last_pub_utc")
@@ -280,6 +282,7 @@ def main():
                     "article_subtitle": entry.get("article_subtitle", ""),
                     "article_summary": entry.get("article_summary", ""),
                     "article_summary_html": entry.get("article_summary_html", ""),
+                    "article_image_url": entry.get("article_image_url", ""),
                 }
             )
             state["pending_deploy"] = True
@@ -327,6 +330,7 @@ def main():
         entry_state["article_subtitle"] = meta.get("article_subtitle", entry.get("article_subtitle", ""))
         entry_state["article_summary"] = meta.get("article_summary", entry.get("article_summary", ""))
         entry_state["article_summary_html"] = meta.get("article_summary_html", entry.get("article_summary_html", ""))
+        entry_state["article_image_url"] = meta.get("article_image_url", entry.get("article_image_url", ""))
 
         print("  → Uploading to Internet Archive")
         out2 = sh(PY, str(ROOT / "upload_to_ia.py"), meta["mp3_local_path"])
@@ -357,6 +361,7 @@ def main():
                 "article_subtitle": meta.get("article_subtitle", entry.get("article_subtitle", "")),
                 "article_summary": meta.get("article_summary", entry.get("article_summary", "")),
                 "article_summary_html": meta.get("article_summary_html", entry.get("article_summary_html", "")),
+                "article_image_url": meta.get("article_image_url", entry.get("article_image_url", "")),
             }
         )
         if generated_this_run:

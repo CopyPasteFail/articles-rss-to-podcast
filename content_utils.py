@@ -5,6 +5,7 @@ from __future__ import annotations
 import html as _html
 import re
 from typing import Tuple
+from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 
@@ -118,10 +119,43 @@ def _get_entry_content_html(entry) -> str:
     return ""
 
 
-def html_to_text(html_content: str) -> tuple[str, str]:
+def _is_valid_itunes_image_url(url: str | None) -> bool:
+    if not url:
+        return False
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    path = parsed.path.lower()
+    return path.endswith((".jpg", ".png"))
+
+
+def _extract_first_image_url(soup: BeautifulSoup, base_url: str | None = None) -> str:
+    """Return the first usable image URL from the soup, or empty string."""
+
+    def normalize(url: str | None) -> str:
+        if not url:
+            return ""
+        url = url.strip()
+        if not url or url.lower().startswith("data:"):
+            return ""
+        return urljoin(base_url or "", url)
+
+    for tag in soup.find_all("img"):
+        src = tag.get("src") or tag.get("data-src") or ""
+        if not src and tag.get("srcset"):
+            srcset = tag.get("srcset").split(",", 1)[0].strip()
+            src = srcset.split(" ", 1)[0]
+        url = normalize(src)
+        if url and _is_valid_itunes_image_url(url):
+            return url
+    return ""
+
+
+def html_to_text(html_content: str, *, base_url: str | None = None) -> tuple[str, str, str]:
     if not html_content:
-        return "", ""
+        return "", "", ""
     soup = BeautifulSoup(html_content, "lxml")
+    lead_image = _extract_first_image_url(soup, base_url)
     _strip_embedded_media(soup)
     subtitle = _extract_subtitle_and_strip_headings(soup)
     for br in soup.find_all("br"):
@@ -134,7 +168,7 @@ def html_to_text(html_content: str) -> tuple[str, str]:
     lines = [line.strip() for line in text.splitlines()]
     filtered = [line for line in lines if line and not _URL_ONLY_RE.fullmatch(line)]
     filtered = _remove_footer_lines(filtered)
-    return "\n".join(filtered).strip(), subtitle
+    return "\n".join(filtered).strip(), subtitle, lead_image
 
 
 def _normalize_text_block(text: str) -> str:
@@ -182,15 +216,15 @@ def _word_count(text: str) -> int:
     return len(re.findall(r"\w+", text))
 
 
-def resolve_article_content(entry, link: str | None = None, *, allow_fetch: bool = False, min_words: int = 80) -> Tuple[str, str, str]:
-    """Return (plain_text, html_content, subtitle) for the entry.
+def resolve_article_content(entry, link: str | None = None, *, allow_fetch: bool = False, min_words: int = 80) -> Tuple[str, str, str, str]:
+    """Return (plain_text, html_content, subtitle, lead_image_url) for the entry.
 
     When ``allow_fetch`` is True and the feed-provided content is short, we
     attempt to download the full article using ``trafilatura``.
     """
 
     html_content = _get_entry_content_html(entry)
-    plain_text, subtitle = html_to_text(html_content)
+    plain_text, subtitle, lead_image = html_to_text(html_content, base_url=link or "")
     normalized_html = text_to_html(plain_text)
 
     if allow_fetch and link and _word_count(plain_text) < max(20, min_words):
@@ -199,5 +233,41 @@ def resolve_article_content(entry, link: str | None = None, *, allow_fetch: bool
             plain_text = fetched_text
             normalized_html = text_to_html(fetched_text)
             subtitle = ""
+            if not lead_image:
+                # Try to re-extract from fetched content if available via html
+                # Trafilatura returns plain text, so leave image empty.
+                lead_image = ""
 
-    return plain_text, normalized_html, subtitle
+    if not lead_image:
+        media = getattr(entry, "media_content", None) or []
+        if isinstance(media, list):
+            for item in media:
+                url = ""
+                if isinstance(item, dict):
+                    url = item.get("url") or ""
+                else:
+                    url = getattr(item, "get", lambda k, d=None: d)("url") or ""
+                if url:
+                    candidate = urljoin(link or "", url)
+                    if _is_valid_itunes_image_url(candidate):
+                        lead_image = candidate
+                        break
+        if not lead_image:
+            thumb = getattr(entry, "media_thumbnail", None) or []
+            if isinstance(thumb, list):
+                for item in thumb:
+                    url = ""
+                    if isinstance(item, dict):
+                        url = item.get("url") or ""
+                    else:
+                        url = getattr(item, "get", lambda k, d=None: d)("url") or ""
+                    if url:
+                        candidate = urljoin(link or "", url)
+                        if _is_valid_itunes_image_url(candidate):
+                            lead_image = candidate
+                            break
+
+    if not _is_valid_itunes_image_url(lead_image):
+        lead_image = ""
+
+    return plain_text, normalized_html, subtitle, lead_image or ""
