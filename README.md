@@ -263,20 +263,7 @@ Reference material:
 
 ---
 
-## Project configuration
-
-Create a root `.env` file with secrets and shared settings:
-
-```bash
-# Cloudflare
-CLOUDFLARE_API_TOKEN=your_cf_api_token
-CLOUDFLARE_ACCOUNT_ID=your_cf_account_id
-CF_PAGES_PROJECT=tts-podcast-feeds
-CF_KV_NAMESPACE_NAME=tts-podcast-state
-
-# Google Cloud
-GOOGLE_APPLICATION_CREDENTIALS=./tts-sa.json
-```
+## Feed configuration
 
 Create one config per feed in `configs/`. Example `configs/geektime.env`:
 
@@ -318,10 +305,6 @@ What happens:
 - Pulls items from `RSS_URL` and checks KV for already published entries.
 - For each new item: extract and clean text, synthesize MP3 via GCP TTS, upload to Internet Archive.
 - Writes or updates `public/feeds/<slug>.xml`.
-- You deploy the `public/` folder to Cloudflare Pages:
-  ```bash
-  wrangler pages deploy public --project-name tts-podcast-feeds
-  ```
 - Optional purge so clients see it immediately:
   ```bash
   curl -X POST \
