@@ -168,6 +168,8 @@ python run_feed.py geektime
 6. Deploy to Cloudflare Pages.  
 7. Update KV with last published article state.  
 
+> Each run processes only the new or changed RSS entries detected since the previous run. Set `PODCAST_FULL_RESCAN=1` to force a full feed rescan if you need to rebuild everything.
+
 ---
 
 ## 5. Subscribing

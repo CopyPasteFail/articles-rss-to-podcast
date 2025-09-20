@@ -190,6 +190,46 @@ def main():
     if not entries:
         raise SystemExit("RSS has no entries")
 
+    total_entries = len(entries)
+    force_full_rescan = os.getenv("PODCAST_FULL_RESCAN", "").strip().lower() in {"1", "true", "yes", "y"}
+    last_processed_pub = state.get("last_pub_utc") or ""
+
+    if force_full_rescan:
+        print("[info] PODCAST_FULL_RESCAN set; scanning entire feed")
+    else:
+        candidates = []
+        for entry in entries:
+            link = entry.get("article_link")
+            entry_pub = entry.get("article_pub_utc", "")
+            if not link:
+                candidates.append(entry)
+                continue
+
+            identifier = ia_identifier_for_link(link)
+            entry_state = items.get(identifier)
+            already_recorded = (
+                entry_state
+                and entry_state.get("rss_added")
+                and entry_state.get("last_pub_utc") == entry_pub
+                and entry_state.get("uploaded_url")
+            )
+            if already_recorded:
+                continue
+
+            if (
+                not entry_state
+                or not entry_state.get("rss_added")
+                or (last_processed_pub and entry_pub and entry_pub > last_processed_pub)
+            ):
+                candidates.append(entry)
+
+        if candidates:
+            entries = candidates
+            print(f"[info] Processing {len(entries)} new/changed RSS entries (out of {total_entries})")
+        else:
+            entries = []
+            print("[info] No new RSS entries detected; skipping re-scan")
+
     feed_xml = os.getenv(
         "FEED_PATH",
         str(PUBLIC / (os.getenv("PODCAST_FILE", f"feeds/{SLUG}.xml"))),
@@ -379,17 +419,15 @@ def main():
     if not processed:
         print("No pending entries - everything up to date")
 
+    cumulative = usage.get("cumulative_characters", 0)
+
+    print("\n[TTS usage]")
     if run_characters:
-        cumulative = usage.get("cumulative_characters", 0)
-        pct = (cumulative / monthly_limit * 100) if monthly_limit else 0
-        print("\n[TTS usage]")
         print(f"  This run: {run_characters:,} characters")
-        print(f"  Recorded total: {cumulative:,} / {monthly_limit:,} characters (~{pct:.1f}% of free tier)")
     else:
-        cumulative = usage.get("cumulative_characters", 0)
-        print("\n[TTS usage]")
-        print(f"  This run: 0 characters (no new synthesis)")
-        print(f"  Recorded total: {cumulative:,} characters")
+        print("  This run: 0 characters (no new synthesis)")
+
+    print(f"  Recorded total: {cumulative:,} characters")
 
     pending_deploy = state.get("pending_deploy", False)
     deploy_needed = feed_updated or pending_deploy
