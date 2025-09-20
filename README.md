@@ -172,6 +172,40 @@ gcloud iam service-accounts keys create ./tts-key.json \
 Update your `.env` (copied from `.env.example`) so `GOOGLE_APPLICATION_CREDENTIALS` targets `./tts-key.json`.
 These commands assume a service account called `tts-runner` and that the key file lives at `./tts-key.json`. If you pick a different name or location, update the matching values in `.env` (and anywhere else the path is referenced).
 
+#### B.5 Tracking Free-Tier TTS Usage via BigQuery
+
+**1. Create a BigQuery dataset** (if you don’t already have one) in your preferred region. For Berlin, run:
+
+```bash
+bq --location=europe-west10 mk --dataset billing_export
+```
+
+This will create a dataset named `billing_export` inside your active project.
+
+---
+
+**2. Enable Billing Export in the Cloud Console:**
+
+- Open the [Billing export page](https://console.cloud.google.com/billing/export) in Google Cloud Console.  
+- Make sure you’ve selected the correct **Billing account** in the top left.  
+- Under **BigQuery export**, you’ll see two sections:  
+  - **Standard usage cost** (daily cost detail per SKU)  
+  - **Detailed usage cost** (hourly, per resource)  
+- Click **Edit settings** under **Standard usage cost**.  
+- In the popup:  
+  - **Project**: choose the project where you created the dataset (e.g. *articles-rss-to-podcast-<YOUR_USERNAME>*).  
+  - **Dataset**: enter `billing_export`.  
+- Click **Save**.
+
+---
+
+After saving, Google will automatically create a table named:
+
+```
+billing_export.gcp_billing_export_v1_<YOUR_BILLING_ACCOUNT_ID>
+```
+
+inside your dataset.
 
 ### C) Create your .env from the template
 
