@@ -177,7 +177,7 @@ These commands assume a service account called `tts-runner` and that the key fil
 **1. Create a BigQuery dataset** (if you don’t already have one) in your preferred region. For Berlin, run:
 
 ```bash
-bq --location=europe-west10 mk --dataset billing_export
+bq --location=EU mk --dataset billing_export
 ```
 
 This will create a dataset named `billing_export` inside your active project.
