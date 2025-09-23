@@ -429,6 +429,19 @@ def main():
 
     print(f"  Recorded total: {cumulative:,} characters")
 
+    if run_characters:
+        try:
+            from tts_usage import fetch_tts_usage
+
+            billing_usage = fetch_tts_usage()
+            summary = billing_usage.get("summary", {})
+            billing_used = summary.get("characters", 0)
+            billing_remaining = summary.get("free_tier_remaining", 0)
+            print("  Billing cycle: {:,} characters used".format(billing_used))
+            print("  Billing cycle: {:,} free characters remaining".format(billing_remaining))
+        except Exception as e:
+            print(f"  Billing query failed: {e}")
+
     pending_deploy = state.get("pending_deploy", False)
     deploy_needed = feed_updated or pending_deploy
 

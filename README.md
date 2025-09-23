@@ -167,6 +167,9 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --role="roles/texttospeech.user"
 gcloud iam service-accounts keys create ./tts-key.json \
   --iam-account="$SA_EMAIL"
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:${SA_EMAIL}" \
+  --role="roles/bigquery.jobUser"
 ```
 
 Update your `.env` (copied from `.env.example`) so `GOOGLE_APPLICATION_CREDENTIALS` targets `./tts-key.json`.
@@ -206,6 +209,15 @@ billing_export.gcp_billing_export_v1_<YOUR_BILLING_ACCOUNT_ID>
 ```
 
 inside your dataset.
+
+**3. Allow the TTS Runner to Read the Billing Export Dataset:**
+
+Adjust `--location` to match your dataset's region.
+
+
+```bash
+bq --location=EU query --use_legacy_sql=false "GRANT \`roles/bigquery.dataViewer\` ON SCHEMA \`${PROJECT_ID}.billing_export\` TO \"serviceAccount:${SA_EMAIL}\";"
+```
 
 ### C) Create your .env from the template
 
