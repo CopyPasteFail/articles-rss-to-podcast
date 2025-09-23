@@ -394,6 +394,81 @@ API reference: https://developers.cloudflare.com/api/resources/cache/methods/pur
 
 2. In Task Scheduler, create a basic task that runs this batch file on the cadence you prefer.
 
+### Google Cloud Deploy (optional)
+
+Use Cloud Deploy to run the pipeline in a controlled release flow that ends with a Cloud Run Job execution. A minimal setup looks like:
+
+1. **Containerize the runner.** Add a `Dockerfile` that installs requirements and sets `CMD ["python", "pipeline.py"]`. Build and push it with Cloud Build:
+
+   ```bash
+   gcloud builds submit --region=$REGION --config=cloudbuild.yaml \
+     --substitutions=_IMAGE_TAG=$(git rev-parse --short HEAD)
+   ```
+
+   Example `cloudbuild.yaml`:
+
+   ```yaml
+   steps:
+     - name: gcr.io/cloud-builders/docker
+       args:
+         ["build", "-t", "$LOCATION-docker.pkg.dev/$PROJECT_ID/rss-tts/pipeline:${_IMAGE_TAG}", "."]
+   images:
+     - $LOCATION-docker.pkg.dev/$PROJECT_ID/rss-tts/pipeline:${_IMAGE_TAG}
+   substitutions:
+     _IMAGE_TAG: dev
+   ```
+
+2. **Create a Cloud Run Job** (once) that invokes the container with your feed slug:
+
+   ```bash
+   gcloud run jobs create rss-tts-job \
+     --image=$LOCATION-docker.pkg.dev/$PROJECT_ID/rss-tts/pipeline:dev \
+     --set-env-vars=TARGET_ENTRY_LINK=,PODCAST_SLUG=geektime \
+     --region=$REGION \
+     --tasks=1
+   ```
+
+3. **Define Cloud Deploy targets.** Save the file below as `clouddeploy.yaml`:
+
+   ```yaml
+   apiVersion: deploy.cloud.google.com/v1
+   kind: DeliveryPipeline
+   metadata:
+     name: rss-tts-pipeline
+   serialPipeline:
+     stages:
+       - targetId: prod
+         profiles: [prod]
+   ---
+   apiVersion: deploy.cloud.google.com/v1
+   kind: Target
+   metadata:
+     name: prod
+   run:
+     location: projects/$PROJECT_ID/locations/$REGION
+   ```
+
+   Apply it once:
+
+   ```bash
+   gcloud deploy apply --file=clouddeploy.yaml --region=$REGION --project=$PROJECT_ID
+   ```
+
+4. **Create a release whenever you want to run the pipeline:**
+
+   ```bash
+   gcloud deploy releases create release-$(date +%Y%m%d-%H%M%S) \
+     --project=$PROJECT_ID \
+     --region=$REGION \
+     --delivery-pipeline=rss-tts-pipeline \
+     --skaffold-file=skaffold.yaml \
+     --images=pipeline=$LOCATION-docker.pkg.dev/$PROJECT_ID/rss-tts/pipeline:${_IMAGE_TAG}
+   ```
+
+   The release promotes the latest image and re-runs the Cloud Run Job; include a Cloud Deploy Skaffold file that updates the job reference to the new image tag.
+
+This approach gives you auditable history, IAM-scoped triggers, and roll-out control for automated runs.
+
 ---
 
 ## Caching and "instant update"
