@@ -436,9 +436,29 @@ def main():
             billing_usage = fetch_tts_usage()
             summary = billing_usage.get("summary", {})
             billing_used = summary.get("characters", 0)
-            billing_remaining = summary.get("free_tier_remaining", 0)
             print("  Billing cycle: {:,} characters used".format(billing_used))
-            print("  Billing cycle: {:,} free characters remaining".format(billing_remaining))
+
+            groups = {
+                (row.get("label") or ""): {
+                    "characters": row.get("characters", 0),
+                    "free_tier_remaining": row.get("free_tier_remaining", 0),
+                }
+                for row in billing_usage.get("by_group", [])
+            }
+
+            standard = groups.get("standard", {"characters": 0, "free_tier_remaining": 0})
+            premium = groups.get("wavenet_or_neural2", {"characters": 0, "free_tier_remaining": 0})
+
+            print(
+                "    Standard voices: used {:,} characters, {:,} free-tier remaining".format(
+                    standard["characters"], standard["free_tier_remaining"],
+                )
+            )
+            print(
+                "    WaveNet/Neural2 voices: used {:,} characters, {:,} free-tier remaining".format(
+                    premium["characters"], premium["free_tier_remaining"],
+                )
+            )
         except Exception as e:
             print(f"  Billing query failed: {e}")
 
