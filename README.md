@@ -22,31 +22,50 @@ Create a podcast from any article RSS feed. This repo fetches new items from a s
 
 ## Quick start
 
+### 1) Clone and prepare Python
+
 ```bash
-# 1) Clone and prepare Python
 git clone https://github.com/CopyPasteFail/articles-rss-to-podcast.git
 cd articles-rss-to-podcast
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
+```
 
-# 2) Copy the sample environment file and fill in secrets
+### 2) Copy the sample environment file and fill in secrets
+
+```bash
 cp .env.example .env
 $EDITOR .env    # set GOOGLE_APPLICATION_CREDENTIALS, CLOUDFLARE_*, IA_* etc.
+```
 
-# 3) Create configs/<your-feed>.env (see example below)
+### 3) Create configs/<your-feed>.env (see example below)
 
-# 4) Run it
-python run_feed.py geektime
+### 3) Prepare NVM
 
-# 5) Deploy the generated public/ folder to Cloudflare Pages
-#    Direct Upload via Wrangler
-npm i -g wrangler
+```bash
+nvm install 20.19.4
+source ~/.nvm/nvm.sh
+nvm use 20.19.4
+
+```
+
+### 5) Deploy the generated public/ folder to Cloudflare Pages
+Direct Upload via Wrangler
+
+```bash
+npm install -g wrangler@4.40.2
 wrangler login
 wrangler pages project create tts-podcast-feeds
 wrangler pages deploy public --project-name tts-podcast-feeds
 ```
+
+### 6) Run it
+```bash
+python run_feed.py <your-feed>
+```
+For example `python run_feed.py geektime`
 
 The resulting RSS is served under `https://<your-pages-domain>/feeds/<slug>.xml`.
 
