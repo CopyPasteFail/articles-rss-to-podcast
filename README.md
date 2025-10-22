@@ -405,7 +405,7 @@ API reference: https://developers.cloudflare.com/api/resources/cache/methods/pur
 
    ```bat
    @echo off
-   wsl.exe -u <WSL_USER> bash -lic "cd /home/<WSL_USER>/path/to/repo && source .venv/bin/activate && python run_feed.py geektime"
+   wsl.exe -u <WSL_USER> bash -lic "source ~/.nvm/nvm.sh && nvm use 20.19.4 && cd /home/<WSL_USER>/path/to/repo && source .venv/bin/activate && python run_feed.py geektime && python run_feed.py eu-startups"
    pause
    ```
 
