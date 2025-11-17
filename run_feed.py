@@ -1,10 +1,13 @@
 #!/usr/bin/env python
+"""Load feed-specific env vars then run the full RSS-to-podcast pipeline."""
+
 import sys, pathlib, subprocess
 from dotenv import load_dotenv
 
 ROOT = pathlib.Path(__file__).resolve().parent
 
 def main():
+    """Entry point for operators: pick a slug, load .env files, run pipeline.py."""
     if len(sys.argv) != 2:
         print("Usage: python run_feed.py <feed_slug>")
         sys.exit(2)

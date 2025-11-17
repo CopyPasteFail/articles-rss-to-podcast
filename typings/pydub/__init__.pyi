@@ -1,3 +1,5 @@
+"""Minimal pydub type hints used by the RSS-to-podcast pipeline."""
+
 from __future__ import annotations
 
 from os import PathLike

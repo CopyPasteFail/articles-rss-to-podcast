@@ -26,12 +26,14 @@ _SeqItem = TypeVar("_SeqItem")
 
 
 def _coerce_str(value: Any) -> str | None:
+    """Normalize feedparser values to strings so the content pipeline can rely on them."""
     if isinstance(value, str) and value:
         return value
     return None
 
 
 def _extract_value_field(data: Any) -> str | None:
+    """Grab ``value`` style fields regardless of whether the feed gave dicts or objects."""
     direct = _coerce_str(data)
     if direct:
         return direct
@@ -47,6 +49,7 @@ def _extract_value_field(data: Any) -> str | None:
 
 
 def _coerce_sequence(value: _SeqItem | list[_SeqItem] | tuple[_SeqItem, ...] | None) -> list[_SeqItem]:
+    """Turn lone values into lists so image scanning code can iterate safely."""
     if value is None:
         return []
     if isinstance(value, list):
@@ -58,6 +61,7 @@ def _coerce_sequence(value: _SeqItem | list[_SeqItem] | tuple[_SeqItem, ...] | N
 
 
 def _media_url_from_item(item: Any) -> str:
+    """Extract a URL-ish field from common feed structures (dict/object)."""
     if isinstance(item, dict):
         dict_item = cast(_FeedMapping, item)
         candidate = dict_item.get("url")
@@ -73,6 +77,7 @@ def _media_url_from_item(item: Any) -> str:
 
 
 def _looks_like_footer(line: str) -> bool:
+    """Detect boilerplate \"appeared first on\" endings so we can strip them."""
     if not line:
         return False
     low = line.strip().lower()
@@ -91,10 +96,12 @@ _SUBTITLE_TAGS = ("h2", "h3", "h4")
 
 
 def _remove_footer_lines(lines: Iterable[str]) -> list[str]:
+    """Filter out footer-looking lines from plain text snippets."""
     return [line for line in lines if not _looks_like_footer(line)]
 
 
 def _strip_embedded_media(soup: BeautifulSoup) -> None:
+    """Remove media/caption tags that would otherwise clutter the spoken summary."""
     for tag_name in _MEDIA_TAGS:
         for tag in soup.find_all(tag_name):
             tag.decompose()
@@ -116,6 +123,7 @@ def _strip_embedded_media(soup: BeautifulSoup) -> None:
 
 
 def _extract_subtitle_and_strip_headings(soup: BeautifulSoup) -> str:
+    """Pull the first subtitle-like heading and drop the rest to keep body clean."""
     subtitle = ""
     body_started = False
     for element in list(soup.find_all(True)):
@@ -164,6 +172,7 @@ def _get_entry_content_html(entry: Any) -> str:
 
 
 def _is_valid_itunes_image_url(url: str | None) -> bool:
+    """Accept only HTTP(S) URLs that end in podcast-friendly image extensions."""
     if not url:
         return False
     parsed = urlsplit(url)
@@ -203,6 +212,7 @@ def _extract_first_image_url(soup: BeautifulSoup, base_url: str | None = None) -
 
 
 def html_to_text(html_content: str, *, base_url: str | None = None) -> tuple[str, str, str]:
+    """Convert HTML into (text, subtitle, lead_image) so TTS reads natural prose."""
     if not html_content:
         return "", "", ""
     soup = BeautifulSoup(html_content, "lxml")
@@ -223,6 +233,7 @@ def html_to_text(html_content: str, *, base_url: str | None = None) -> tuple[str
 
 
 def _normalize_text_block(text: str) -> str:
+    """Clean fetched article text so fallback paragraphs sound human once spoken."""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = _MULTI_NEWLINE_RE.sub("\n\n", text)
     text = _WHITESPACE_RE.sub(" ", text)
@@ -234,6 +245,7 @@ def _normalize_text_block(text: str) -> str:
 
 
 def fetch_article_text(url: str) -> str:
+    """Best-effort fetch of the live article when feed content is too short."""
     if not url or trafilatura is None:
         return ""
     try:
@@ -249,6 +261,7 @@ def fetch_article_text(url: str) -> str:
 
 
 def text_to_html(text: str) -> str:
+    """Rebuild simple HTML paragraphs from the normalized article text."""
     if not text:
         return ""
     paragraphs = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
@@ -262,6 +275,7 @@ def text_to_html(text: str) -> str:
 
 
 def _word_count(text: str) -> int:
+    """Tiny helper so we know when to refetch a short entry from the site."""
     if not text:
         return 0
     return len(re.findall(r"\w+", text))

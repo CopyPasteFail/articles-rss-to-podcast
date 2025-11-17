@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+"""Create a single podcast episode MP3 from a chosen RSS article."""
+
 from __future__ import annotations
 
 import datetime
@@ -19,6 +21,8 @@ from content_utils import resolve_article_content, text_to_html
 
 
 class EntryMeta(TypedDict):
+    """Normalized info about an article that we can safely feed into TTS."""
+
     link: str
     title: str
     article_text: str
@@ -30,6 +34,8 @@ class EntryMeta(TypedDict):
 
 
 class SidecarPayload(TypedDict):
+    """Metadata blob written next to each MP3 for downstream automation."""
+
     article_title: str
     article_summary: str
     article_summary_html: str
@@ -45,6 +51,8 @@ class SidecarPayload(TypedDict):
     tts_generated: bool
 
 class _TTSClient(Protocol):
+    """Protocol to help type-check Google Text-to-Speech client usage."""
+
     def synthesize_speech(
         self,
         *,
@@ -65,6 +73,7 @@ TARGET_ID = os.getenv("TARGET_ENTRY_ID", "").strip()
 
 
 def _ensure_str(value: object, *, default: str = "") -> str:
+    """Return feedparser values as plain strings so the rest of the flow stays sane."""
     if isinstance(value, str):
         return value
     if value is None:
@@ -72,6 +81,7 @@ def _ensure_str(value: object, *, default: str = "") -> str:
     return str(value)
 
 def slugify(url_or_title: str) -> str:
+    """Turn a link or title into a short filesystem-friendly slug for the MP3 name."""
     base = url_or_title.strip()
     base = re.sub(r"https?://", "", base)
     base = re.sub(r"[^a-zA-Z0-9]+", "-", base.lower()).strip("-")
@@ -79,6 +89,7 @@ def slugify(url_or_title: str) -> str:
 
 
 def feed_entry_to_meta(e: object, *, allow_fetch: bool = False) -> EntryMeta:
+    """Expand a feed entry into EntryMeta so downstream SSML rendering has clean data."""
     link_source = getattr(e, "link", None) or getattr(e, "id", None)
     link = _ensure_str(link_source)
     title_value = getattr(e, "title", None)
@@ -111,12 +122,14 @@ def feed_entry_to_meta(e: object, *, allow_fetch: bool = False) -> EntryMeta:
 
 
 def select_entry() -> EntryMeta:
+    """Pick the requested feed entry (or the latest) as the base article for the episode."""
     parsed: feedparser.FeedParserDict = feedparser.parse(RSS_URL)
     entries: list[object] = list(parsed.entries)
     if not entries:
         sys.exit("RSS has no entries")
 
     def matches_target(entry: object) -> bool:
+        """Check whether the feed entry matches the CLI-supplied target filters."""
         link = _ensure_str(getattr(entry, "link", None))
         entry_id = _ensure_str(getattr(entry, "id", None))
         if TARGET_LINK and link == TARGET_LINK:
@@ -138,6 +151,7 @@ MAX_PARAGRAPH_CHARS = 1000  # break very large paragraphs into smaller chunks
 
 
 def _chunk_paragraph(text: str, limit: int) -> list[str]:
+    """Break one long paragraph into smaller slices so the TTS API accepts them."""
     words = text.split()
     if not words:
         return [text]
@@ -159,6 +173,7 @@ def _chunk_paragraph(text: str, limit: int) -> list[str]:
 
 
 def _normalize_paragraphs(paragraphs: list[str]) -> list[str]:
+    """Clean and right-size paragraphs before we assemble the SSML sections."""
     normalized: list[str] = []
     for para in paragraphs:
         para = para.strip()
@@ -172,6 +187,7 @@ def _normalize_paragraphs(paragraphs: list[str]) -> list[str]:
 
 
 def _mk_segment(title: str, paras: Sequence[str], include_title: bool) -> str:
+    """Wrap title + paragraphs in SSML so the TTS step knows exactly what to read."""
     parts = ["<speak>"]
     if include_title:
         parts.append(f"<p>{html.escape(title)}</p>")
@@ -182,7 +198,7 @@ def _mk_segment(title: str, paras: Sequence[str], include_title: bool) -> str:
 
 
 def render_ssml(meta: EntryMeta) -> tuple[list[str], int]:
-    """Return SSML payload segments and character count."""
+    """Convert article text into bite-sized SSML segments and character counts before TTS."""
     title = meta["title"]
     body_text = (meta.get("article_text") or meta.get("article_html") or "").strip()
     paragraphs = [p.strip() for p in re.split(r"\n{2,}", body_text) if p.strip()]
@@ -201,6 +217,7 @@ def render_ssml(meta: EntryMeta) -> tuple[list[str], int]:
     include_title = True
 
     def flush_current(curr: Sequence[str], include_title_flag: bool) -> None:
+        """Move buffered paragraphs into the final list while preserving the title flag."""
         if not curr and include_title_flag:
             return
         segments.append(_mk_segment(title, curr, include_title_flag))
@@ -249,6 +266,7 @@ def render_ssml(meta: EntryMeta) -> tuple[list[str], int]:
     return segments, char_count
 
 def synthesize_ssml(ssml_segments: Sequence[str], out_path: pathlib.Path) -> None:
+    """Send the SSML segments to Google, stitch the MP3s, and write the output for downstream steps."""
     client: _TTSClient = texttospeech.TextToSpeechClient()
     name = VOICE
     lang = LANG
@@ -285,11 +303,13 @@ def synthesize_ssml(ssml_segments: Sequence[str], out_path: pathlib.Path) -> Non
     print(f"Voice: {name}  Lang: {lang}")
 
 def normalize_mp3(path: pathlib.Path) -> None:
+    """Run loudness normalization right after synthesis so the finished MP3 sounds consistent."""
     audio = AudioSegment.from_file(path)
     audio = effects.normalize(audio)
     audio.export(path, format="mp3")
 
 def main() -> None:
+    """Drive the whole flow: select an article, render SSML, build MP3 + sidecar."""
     if not RSS_URL:
         sys.exit("Missing RSS_URL")
 

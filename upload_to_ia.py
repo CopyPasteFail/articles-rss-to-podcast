@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+"""Upload generated MP3s to Internet Archive and print the public download URL."""
+
 from __future__ import annotations  # keep compatibility with <3.11 lazy annotations
 
 import hashlib
@@ -14,14 +16,20 @@ import requests
 
 
 class UploadResponse(Protocol):
+    """Subset of the IA response that matters for our success checks."""
+
     ok: bool
 
 
 class ArchiveFile(Protocol):
+    """Protocol describing the file objects returned by internetarchive."""
+
     name: str
 
 
 class ArchiveItem(Protocol):
+    """Minimal surface from internetarchive.Item that we actually call."""
+
     def upload(
         self,
         files: Mapping[str, str],
@@ -36,6 +44,8 @@ class ArchiveItem(Protocol):
 
 
 class ArchiveSession(Protocol):
+    """internetarchive.get_session interface (real or mocked)."""
+
     def get_item(self, identifier: str) -> ArchiveItem:
         ...
 
@@ -46,6 +56,7 @@ def get_session(
     debug: bool = False,
     http_adapter_kwargs: MutableMapping[str, Any] | None = None,
 ) -> ArchiveSession:
+    """Wrapper around internetarchive.get_session so tests can stub it easily."""
     ia = cast(Any, internetarchive)
     return cast(
         ArchiveSession,
@@ -112,6 +123,7 @@ def upload_with_retries(
     raise RuntimeError("upload_with_retries exhausted without returning or raising")
 
 def read_sidecar(mp3_path: pathlib.Path) -> dict[str, Any]:
+    """Load the JSON metadata produced alongside the MP3."""
     sidecar = mp3_path.with_suffix(mp3_path.suffix + ".rssmeta.json")
     if not sidecar.exists():
         sys.exit(f"Sidecar not found: {sidecar}")
@@ -119,11 +131,13 @@ def read_sidecar(mp3_path: pathlib.Path) -> dict[str, Any]:
         return json.load(f)
 
 def link_id(link: str) -> str:
+    """Generate deterministic IA identifiers per-article so reruns overwrite safely."""
     slug = os.getenv("PODCAST_SLUG", "default")
     h = hashlib.sha1(link.encode("utf-8")).hexdigest()[:16]
     return f"tts-{slug}-{h}"
 
 def get_ia_session() -> ArchiveSession:
+    """Decide whether to use explicit env credentials or fall back to local config."""
     os.environ.pop("IA_CONFIG_FILE", None)
     ak = os.getenv("IA_ACCESS_KEY")
     sk = os.getenv("IA_SECRET_KEY")
@@ -134,6 +148,7 @@ def get_ia_session() -> ArchiveSession:
     return get_session(config_file="")
 
 def main() -> None:
+    """CLI entry point invoked by pipeline.py right before RSS regeneration."""
     if len(sys.argv) < 2:
         print("Usage: python upload_to_ia.py path/to/file.mp3")
         sys.exit(2)

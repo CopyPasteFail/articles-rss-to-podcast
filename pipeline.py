@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+"""End-to-end pipeline that turns an RSS feed into fully hosted podcast episodes."""
+
 from __future__ import annotations
 
 import datetime
@@ -25,26 +27,34 @@ StateItems = dict[str, JSONDict]
 
 
 class FeedParserDict(dict[str, Any]):
+    """Narrow type so the pipeline knows feedparser returns an object with entries."""
+
     entries: list[Any]
 
 
 class BillingGroup(TypedDict):
+    """Minimal billing snapshot for a specific Google TTS price tier."""
+
     characters: int
     free_tier_remaining: int
 
 
 class BillingUsage(TypedDict, total=False):
+    """Structured response used when printing TTS billing info at the end."""
+
     summary: JSONDict
     by_group: list[JSONDict]
 
 
 def _ensure_json_dict(value: object) -> JSONDict:
+    """Keep the persisted pipeline state predictable by forcing dict-like data."""
     if isinstance(value, dict):
         return cast(JSONDict, value)
     return {}
 
 
 def _empty_billing_group() -> BillingGroup:
+    """Return a zeroed-out billing group so we can safely access fields later."""
     return BillingGroup(characters=0, free_tier_remaining=0)
 
 
@@ -68,12 +78,14 @@ _feedparser_module: FeedparserModule | None = None
 
 
 def _get_feedparser() -> FeedparserModule:
+    """Lazy-load feedparser so short-lived CLI invocations stay snappy."""
     global _feedparser_module
     if _feedparser_module is None:
         module = importlib.import_module("feedparser")
         _feedparser_module = cast(FeedparserModule, module)
     return _feedparser_module
 
+# Root folders used throughout the flow (generation -> upload -> deploy).
 ROOT = pathlib.Path(__file__).resolve().parent
 OUT  = pathlib.Path(os.getenv("OUT_DIR", "./out")).resolve()
 PUBLIC = (ROOT / "public").resolve()
@@ -91,6 +103,7 @@ SLUG = os.getenv("PODCAST_SLUG", "default").strip()
 RSS_URL = os.getenv("RSS_URL", "").strip()
 
 def sh(*args: object, env: Mapping[str, str] | None = None, cwd: StrPath | None = None) -> str:
+    """Run a subprocess while echoing commands so the long pipeline stays observable."""
     print("→", " ".join(map(str, args)))
     try:
         out = subprocess.check_output(
@@ -108,6 +121,7 @@ def sh(*args: object, env: Mapping[str, str] | None = None, cwd: StrPath | None 
 
 
 def git_info() -> tuple[str | None, str | None]:
+    """Return branch + commit so deploys can label the Cloudflare Pages run."""
     try:
         branch = sh("git", "rev-parse", "--abbrev-ref", "HEAD", cwd=str(ROOT)).strip()
         commit = sh("git", "rev-parse", "HEAD", cwd=str(ROOT)).strip()
@@ -117,11 +131,13 @@ def git_info() -> tuple[str | None, str | None]:
 
 # ---------- Cloudflare KV helpers ----------
 def _kv_base() -> str:
+    """Base Cloudflare KV URL used by the state helpers below."""
     if not (CF_ACCOUNT_ID and CF_API_TOKEN):
         raise SystemExit("Missing CLOUDFLARE_API_TOKEN or CF_ACCOUNT_ID")
     return f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/storage/kv/namespaces"
 
 def ensure_kv_namespace_id() -> str:
+    """Ensure we know the KV namespace id so we can store per-feed progress."""
     global _cf_kv_namespace_id
     if _cf_kv_namespace_id:
         return _cf_kv_namespace_id
@@ -143,10 +159,12 @@ def ensure_kv_namespace_id() -> str:
     return _cf_kv_namespace_id
 
 def kv_url(key: str) -> str:
+    """Build the REST endpoint for a specific KV key."""
     return f"{_kv_base()}/{ensure_kv_namespace_id()}/values/{key}"
 
 
 def kv_get(key: str) -> JSONDict | None:
+    """Read JSON pipeline state for the feed from Cloudflare KV."""
     try:
         r = requests.get(kv_url(key), headers={"Authorization": f"Bearer {CF_API_TOKEN}"}, timeout=15)
         if r.status_code == 200:
@@ -160,6 +178,7 @@ def kv_get(key: str) -> JSONDict | None:
         return None
 
 def kv_put(key: str, data: JSONDict) -> bool:
+    """Store mutable pipeline state back into Cloudflare KV."""
     try:
         r = requests.put(
             kv_url(key),
@@ -177,12 +196,15 @@ def kv_put(key: str, data: JSONDict) -> bool:
 
 # ---------- IA helpers ----------
 def link_hash(link: str) -> str:
+    """Return a stable short hash used anywhere we need deterministic filenames."""
     return hashlib.sha1(link.encode("utf-8")).hexdigest()
 
 def ia_identifier_for_link(link: str) -> str:
+    """Namespace the link hash so uploads land under unique IA identifiers."""
     return f"tts-{SLUG}-{link_hash(link)[:16]}"
 
 def ia_has_episode_http(identifier: str) -> bool:
+    """Quickly check whether IA already hosts audio for this entry."""
     url = f"https://archive.org/download/{identifier}/episode.mp3"
     try:
         r = requests.head(url, allow_redirects=True, timeout=10)
@@ -192,6 +214,7 @@ def ia_has_episode_http(identifier: str) -> bool:
 
 # ---------- RSS fetch helpers ----------
 def _entry_from_feed(e: Any) -> EntryDict:
+    """Map feedparser entries to the schema expected by the rest of the pipeline."""
     link = getattr(e, "link", None) or getattr(e, "id", None)
     title = getattr(e, "title", link)
     plain_text, html_content, subtitle, lead_image = resolve_article_content(e, link, allow_fetch=False)
@@ -217,6 +240,7 @@ def _entry_from_feed(e: Any) -> EntryDict:
 
 
 def fetch_entries_from_rss(limit: int | None = None) -> list[EntryDict]:
+    """Pull entries from the configured RSS feed so we know what to process."""
     feedparser = _get_feedparser()
     p = feedparser.parse(RSS_URL)
     if not p.entries:
@@ -251,10 +275,12 @@ def update_latest_state_snapshot(state: JSONDict) -> None:
         state["uploaded_url"] = latest.get("uploaded_url")
 
 def newest_sidecar() -> str | None:
+    """Return the latest sidecar on disk as a fallback when parsing TTS output."""
     sc = sorted(OUT.glob("*.mp3.rssmeta.json"), key=os.path.getmtime, reverse=True)
     return str(sc[0]) if sc else None
 
 def main() -> None:
+    """Coordinate fetching entries, synthesizing audio, uploading, and feed updates."""
     if not RSS_URL:
         raise SystemExit("Missing RSS_URL")
 
@@ -331,6 +357,7 @@ def main() -> None:
     run_characters = 0
 
     def estimate_characters(meta_like: Mapping[str, Any]) -> int:
+        """Approximate characters for billing before we run expensive TTS work."""
         summary = str(meta_like.get("article_summary") or "")
         summary_clean = re.sub("<.*?>", "", summary)
         subtitle = str(meta_like.get("article_subtitle") or "")
@@ -583,6 +610,7 @@ def main() -> None:
         print("Feed unchanged; skipping deploy")
 
 def deploy_pages() -> tuple[bool, bool]:
+    """Kick Cloudflare Pages so listeners can see RSS/website updates right away."""
     # Optional automatic deploy to Cloudflare Pages with Wrangler
     if CF_API_TOKEN and CF_ACCOUNT_ID and CF_PAGES_PROJECT:
         if shutil.which("wrangler"):

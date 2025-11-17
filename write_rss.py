@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+"""Build and update the podcast RSS feed after each successful upload."""
+
 from __future__ import annotations
 
 import datetime
@@ -19,6 +21,8 @@ from feedgen.feed import FeedGenerator
 
 
 class ChannelMeta(TypedDict):
+    """Minimal description of the entire podcast channel."""
+
     title: str
     site: str
     desc: str
@@ -29,6 +33,8 @@ class ChannelMeta(TypedDict):
 
 
 class EpisodePayload(TypedDict):
+    """Sidecar payload values that we append into the RSS feed."""
+
     article_title: str
     article_pub_utc: str
     audio_url: str
@@ -40,6 +46,8 @@ class EpisodePayload(TypedDict):
 
 
 class PodcastExtension(Protocol):
+    """Feedgen's iTunes extension interface (subset used by this script)."""
+
     def itunes_author(self, author: str) -> None: ...
 
     def itunes_explicit(self, explicit: str) -> None: ...
@@ -52,6 +60,8 @@ class PodcastExtension(Protocol):
 
 
 class FeedEntryProtocol(Protocol):
+    """Protocol describing feed entries so type-checkers stay happy."""
+
     @property
     def podcast(self) -> PodcastExtension: ...
 
@@ -67,6 +77,8 @@ class FeedEntryProtocol(Protocol):
 
 
 class FeedGeneratorProtocol(Protocol):
+    """Protocol describing the feed generator API we rely on."""
+
     @property
     def podcast(self) -> PodcastExtension: ...
 
@@ -91,14 +103,17 @@ ITUNES_NS = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
 
 
 def _create_feed_generator() -> FeedGeneratorProtocol:
+    """Return the feedgen FeedGenerator with a protocol-friendly type."""
     return cast(FeedGeneratorProtocol, FeedGenerator())
 
 
 def rfc2822(dt: datetime.datetime) -> str:
+    """Format datetimes the way RSS readers expect."""
     return email.utils.format_datetime(dt)
 
 
 def get_len(url: str) -> int | None:
+    """Fetch Content-Length so enclosure entries have accurate file sizes."""
     try:
         response = requests.head(url, allow_redirects=True, timeout=15)
         value = response.headers.get("Content-Length")
@@ -117,6 +132,7 @@ def ensure_base_feed(
     image_url: str,
     feed_url: str,
 ) -> None:
+    """Create a minimal RSS skeleton if it does not exist yet."""
     fp = pathlib.Path(feed_path)
     fp.parent.mkdir(parents=True, exist_ok=True)
     if fp.exists() and fp.stat().st_size > 0:
@@ -141,6 +157,7 @@ def ensure_base_feed(
 
 
 def _valid_itunes_image(url: str | None) -> bool:
+    """Validate episode images so podcast apps do not reject the feed."""
     if not url:
         return False
     parsed = urlsplit(url)
@@ -150,6 +167,7 @@ def _valid_itunes_image(url: str | None) -> bool:
 
 
 def add_item(feed_path: str, channel_meta: ChannelMeta, ep: EpisodePayload, keep_last: int = 200) -> None:
+    """Append the episode described by ``ep`` and trim the feed to ``keep_last`` items."""
     items: list[FeedItem] = []
     if os.path.exists(feed_path):
         tree = ET.parse(feed_path)
@@ -242,6 +260,7 @@ def add_item(feed_path: str, channel_meta: ChannelMeta, ep: EpisodePayload, keep
 
 
 def resolve_feed_path() -> str:
+    """Figure out where to write the RSS file based on environment variables."""
     fp = os.getenv("FEED_PATH", "").strip()
     if fp:
         return fp
@@ -250,6 +269,7 @@ def resolve_feed_path() -> str:
 
 
 def main() -> None:
+    """CLI entry point invoked after each upload to refresh the RSS feed."""
     if len(sys.argv) < 3:
         print("Usage: python write_rss.py <audio_url> <sidecar_json_path>")
         sys.exit(2)

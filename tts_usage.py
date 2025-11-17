@@ -1,4 +1,5 @@
-# tts_usage.py
+"""Query GCP billing export so the pipeline can report Text-to-Speech usage."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -87,28 +88,39 @@ ORDER BY section, label
 
 @dataclass
 class UsageRow:
+    """Flattened view of the SQL results used for summary/by_group/daily tables."""
+
     section: str
     label: Optional[str]
     characters: int
     free_tier_remaining: Optional[int]
 
+
 class UsageSummary(TypedDict):
+    """High-level usage numbers shown when the pipeline finishes a run."""
+
     characters: int
     free_tier_remaining: int
 
 
 class UsageGroup(TypedDict):
+    """Per-voice-group stats so we know when each tier hits its limit."""
+
     label: Optional[str]
     characters: int
     free_tier_remaining: int
 
 
 class UsageDaily(TypedDict):
+    """Daily breakdown for operators wondering when spend spiked."""
+
     label: Optional[str]
     characters: int
 
 
 class UsageReport(TypedDict):
+    """Convenience container returned by fetch_tts_usage."""
+
     summary: UsageSummary
     by_group: List[UsageGroup]
     daily: List[UsageDaily]
@@ -122,14 +134,17 @@ Numeric = Union[int, float, Decimal]
 
 
 def _int_or_zero(value: Optional[Numeric]) -> int:
+    """Guard against NULL numeric fields coming back from BigQuery."""
     return 0 if value is None else int(value)
 
 
 def _optional_int(value: Optional[Numeric]) -> Optional[int]:
+    """Convert numeric values to ints while preserving None."""
     return None if value is None else int(value)
 
 
 def _rows_from_query(result: Iterable[BigQueryRow]) -> List[UsageRow]:
+    """Turn the BigQuery response into friendly UsageRow objects."""
     rows: List[UsageRow] = []
     for row in result:
         section = cast(str, row["section"])
@@ -148,7 +163,7 @@ def _rows_from_query(result: Iterable[BigQueryRow]) -> List[UsageRow]:
 
 
 def fetch_tts_usage(client: Optional[bigquery.Client] = None) -> UsageReport:
-    """Return current billing-cycle usage grouped for CLI and programmatic use."""
+    """Run the billing SQL so pipeline.py can update stats and CLI can print them."""
     provided_client = client is not None
     client = client or bigquery.Client(project=os.environ.get("GOOGLE_CLOUD_PROJECT"))
     try:
@@ -184,6 +199,7 @@ def fetch_tts_usage(client: Optional[bigquery.Client] = None) -> UsageReport:
 
 
 def _print_table(headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
+    """Pretty-print tabular data for the CLI report."""
     # rows = list of iterables (strings or numbers)
     string_rows: List[List[str]] = [[str(c) for c in r] for r in rows]
     widths = [len(h) for h in headers]
@@ -201,6 +217,7 @@ def _print_table(headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
 
 
 def print_usage_report(data: Mapping[str, Any]) -> None:
+    """Simple CLI front-end for fetch_tts_usage (used locally and in automation)."""
     summary_value = cast(Optional[UsageSummary], data.get("summary"))
     summary: UsageSummary = summary_value if summary_value is not None else _EMPTY_SUMMARY
     by_group_value = cast(Optional[Sequence[UsageGroup]], data.get("by_group"))
@@ -234,6 +251,7 @@ def print_usage_report(data: Mapping[str, Any]) -> None:
 
 
 def main():
+    """CLI entry point for ad-hoc inspection."""
     data = fetch_tts_usage()
     print_usage_report(data)
 
