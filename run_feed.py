@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import os, sys, pathlib, subprocess
+import sys, pathlib, subprocess
 from dotenv import load_dotenv
 
 ROOT = pathlib.Path(__file__).resolve().parent

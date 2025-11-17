@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Any
+from decimal import Decimal
+from typing import Any, Iterable, List, Mapping, Optional, Sequence, Tuple, TypedDict, Union, cast
 import os
 
 from google.cloud import bigquery
+from google.cloud.bigquery.table import Row as BigQueryRow
 
 # Fully qualified table name (keep as-is or read from env)
 FQTN = os.environ.get(
@@ -90,20 +92,62 @@ class UsageRow:
     characters: int
     free_tier_remaining: Optional[int]
 
-def _rows_from_query(result: Iterable[bigquery.table.Row]) -> List[UsageRow]:
+class UsageSummary(TypedDict):
+    characters: int
+    free_tier_remaining: int
+
+
+class UsageGroup(TypedDict):
+    label: Optional[str]
+    characters: int
+    free_tier_remaining: int
+
+
+class UsageDaily(TypedDict):
+    label: Optional[str]
+    characters: int
+
+
+class UsageReport(TypedDict):
+    summary: UsageSummary
+    by_group: List[UsageGroup]
+    daily: List[UsageDaily]
+
+
+_EMPTY_SUMMARY: UsageSummary = {"characters": 0, "free_tier_remaining": 0}
+_EMPTY_GROUPS: Tuple[UsageGroup, ...] = ()
+_EMPTY_DAILY: Tuple[UsageDaily, ...] = ()
+
+Numeric = Union[int, float, Decimal]
+
+
+def _int_or_zero(value: Optional[Numeric]) -> int:
+    return 0 if value is None else int(value)
+
+
+def _optional_int(value: Optional[Numeric]) -> Optional[int]:
+    return None if value is None else int(value)
+
+
+def _rows_from_query(result: Iterable[BigQueryRow]) -> List[UsageRow]:
     rows: List[UsageRow] = []
     for row in result:
+        section = cast(str, row["section"])
+        label = cast(Optional[str], row["label"])
+        characters_value = cast(Optional[Numeric], row["characters"])
+        free_tier_value = cast(Optional[Numeric], row["free_tier_remaining"])
         rows.append(
             UsageRow(
-                section=row["section"],
-                label=row["label"],
-                characters=int(row["characters"] or 0),
-                free_tier_remaining=int(row["free_tier_remaining"]) if row["free_tier_remaining"] is not None else None,
+                section=section,
+                label=label,
+                characters=_int_or_zero(characters_value),
+                free_tier_remaining=_optional_int(free_tier_value),
             )
         )
     return rows
 
-def fetch_tts_usage(client: Optional[bigquery.Client] = None) -> Dict[str, Any]:
+
+def fetch_tts_usage(client: Optional[bigquery.Client] = None) -> UsageReport:
     """Return current billing-cycle usage grouped for CLI and programmatic use."""
     provided_client = client is not None
     client = client or bigquery.Client(project=os.environ.get("GOOGLE_CLOUD_PROJECT"))
@@ -138,30 +182,35 @@ def fetch_tts_usage(client: Optional[bigquery.Client] = None) -> Dict[str, Any]:
         ],
     }
 
-def _print_table(headers, rows):
+
+def _print_table(headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
     # rows = list of iterables (strings or numbers)
-    rows = [[str(c) for c in r] for r in rows]
+    string_rows: List[List[str]] = [[str(c) for c in r] for r in rows]
     widths = [len(h) for h in headers]
-    for r in rows:
+    for r in string_rows:
         for i, c in enumerate(r):
             if i < len(widths):
                 widths[i] = max(widths[i], len(c))
             else:
                 widths.append(len(c))
-    def fmt(row):
+    def fmt(row: Sequence[str]) -> str:
         return "  ".join(f"{val:<{widths[i]}}" for i, val in enumerate(row))
     print(fmt(headers))
-    for r in rows:
+    for r in string_rows:
         print(fmt(r))
 
-def print_usage_report(data):
-    summary = data.get("summary", {})
-    by_group = data.get("by_group", [])
-    daily = data.get("daily", [])
+
+def print_usage_report(data: Mapping[str, Any]) -> None:
+    summary_value = cast(Optional[UsageSummary], data.get("summary"))
+    summary: UsageSummary = summary_value if summary_value is not None else _EMPTY_SUMMARY
+    by_group_value = cast(Optional[Sequence[UsageGroup]], data.get("by_group"))
+    by_group: Sequence[UsageGroup] = by_group_value if by_group_value is not None else _EMPTY_GROUPS
+    daily_value = cast(Optional[Sequence[UsageDaily]], data.get("daily"))
+    daily: Sequence[UsageDaily] = daily_value if daily_value is not None else _EMPTY_DAILY
 
     print("=== Invoice month total ===")
-    print(f"characters: {summary.get('characters', 0)}")
-    print(f"free_tier_remaining: {summary.get('free_tier_remaining', 0)}")
+    print(f"characters: {summary['characters']}")
+    print(f"free_tier_remaining: {summary['free_tier_remaining']}")
     print()
 
     print("=== By group (invoice month) ===")
@@ -169,9 +218,8 @@ def print_usage_report(data):
         print("none")
     else:
         headers = ["group", "used", "free_left"]
-        rows = [
-            [r.get("label"), str(r.get("characters", 0)), str(r.get("free_tier_remaining", 0))]
-            for r in by_group
+        rows: List[Sequence[Any]] = [
+            (r["label"], r["characters"], r["free_tier_remaining"]) for r in by_group
         ]
         _print_table(headers, rows)
     print()
@@ -181,7 +229,7 @@ def print_usage_report(data):
         print("none")
     else:
         headers = ["day", "chars"]
-        rows = [[r.get("label"), str(r.get("characters", 0))] for r in daily]
+        rows = [(r["label"], r["characters"]) for r in daily]
         _print_table(headers, rows)
 
 
