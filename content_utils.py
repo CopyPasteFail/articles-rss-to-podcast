@@ -216,7 +216,13 @@ def _word_count(text: str) -> int:
     return len(re.findall(r"\w+", text))
 
 
-def resolve_article_content(entry, link: str | None = None, *, allow_fetch: bool = False, min_words: int = 80) -> Tuple[str, str, str, str]:
+def resolve_article_content(
+    entry: object,
+    link: str | None = None,
+    *,
+    allow_fetch: bool = False,
+    min_words: int = 80,
+) -> Tuple[str, str, str, str]:
     """Return (plain_text, html_content, subtitle, lead_image_url) for the entry.
 
     When ``allow_fetch`` is True and the feed-provided content is short, we

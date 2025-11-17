@@ -1,7 +1,78 @@
 #!/usr/bin/env python
-import os, sys, json, hashlib, pathlib, subprocess, datetime, shutil, requests, re
+from __future__ import annotations
+
+import datetime
+import hashlib
+import importlib
+import json
+import os
+import pathlib
+import re
+import shutil
+import subprocess
+import sys
+from collections.abc import Mapping
+from typing import Any, Protocol, TypedDict, cast
+
+import requests
 
 from content_utils import resolve_article_content, text_to_html
+
+StrPath = str | os.PathLike[str]
+JSONDict = dict[str, Any]
+EntryDict = dict[str, Any]
+StateItems = dict[str, JSONDict]
+
+
+class FeedParserDict(dict[str, Any]):
+    entries: list[Any]
+
+
+class BillingGroup(TypedDict):
+    characters: int
+    free_tier_remaining: int
+
+
+class BillingUsage(TypedDict, total=False):
+    summary: JSONDict
+    by_group: list[JSONDict]
+
+
+def _ensure_json_dict(value: object) -> JSONDict:
+    if isinstance(value, dict):
+        return cast(JSONDict, value)
+    return {}
+
+
+def _empty_billing_group() -> BillingGroup:
+    return BillingGroup(characters=0, free_tier_remaining=0)
+
+
+class FeedparserModule(Protocol):
+    def parse(
+        self,
+        url_file_stream_or_string: str,
+        etag: Any | None = ...,
+        modified: Any | None = ...,
+        agent: Any | None = ...,
+        referrer: Any | None = ...,
+        handlers: Any | None = ...,
+        request_headers: Any | None = ...,
+        response_headers: Any | None = ...,
+        resolve_relative_uris: bool | None = ...,
+        sanitize_html: bool | None = ...,
+    ) -> FeedParserDict: ...
+
+
+_feedparser_module: FeedparserModule | None = None
+
+
+def _get_feedparser() -> FeedparserModule:
+    global _feedparser_module
+    if _feedparser_module is None:
+        module = importlib.import_module("feedparser")
+        _feedparser_module = cast(FeedparserModule, module)
+    return _feedparser_module
 
 ROOT = pathlib.Path(__file__).resolve().parent
 OUT  = pathlib.Path(os.getenv("OUT_DIR", "./out")).resolve()
@@ -13,13 +84,13 @@ PY = sys.executable
 CF_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip()
 CF_API_TOKEN  = os.getenv("CLOUDFLARE_API_TOKEN", "").strip()
 CF_PAGES_PROJECT = os.getenv("CF_PAGES_PROJECT", "tts-podcast-feeds").strip()
-CF_KV_NAMESPACE_ID = os.getenv("CF_KV_NAMESPACE_ID", "").strip()
 CF_KV_NAMESPACE_NAME = os.getenv("CF_KV_NAMESPACE_NAME", "tts-podcast-state").strip()
+_cf_kv_namespace_id = os.getenv("CF_KV_NAMESPACE_ID", "").strip()
 
 SLUG = os.getenv("PODCAST_SLUG", "default").strip()
 RSS_URL = os.getenv("RSS_URL", "").strip()
 
-def sh(*args, env=None, cwd=None):
+def sh(*args: object, env: Mapping[str, str] | None = None, cwd: StrPath | None = None) -> str:
     print("→", " ".join(map(str, args)))
     try:
         out = subprocess.check_output(
@@ -36,7 +107,7 @@ def sh(*args, env=None, cwd=None):
         raise
 
 
-def git_info():
+def git_info() -> tuple[str | None, str | None]:
     try:
         branch = sh("git", "rev-parse", "--abbrev-ref", "HEAD", cwd=str(ROOT)).strip()
         commit = sh("git", "rev-parse", "HEAD", cwd=str(ROOT)).strip()
@@ -45,35 +116,37 @@ def git_info():
         return None, None
 
 # ---------- Cloudflare KV helpers ----------
-def _kv_base():
+def _kv_base() -> str:
     if not (CF_ACCOUNT_ID and CF_API_TOKEN):
         raise SystemExit("Missing CLOUDFLARE_API_TOKEN or CF_ACCOUNT_ID")
     return f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/storage/kv/namespaces"
 
-def ensure_kv_namespace_id():
-    global CF_KV_NAMESPACE_ID
-    if CF_KV_NAMESPACE_ID:
-        return CF_KV_NAMESPACE_ID
+def ensure_kv_namespace_id() -> str:
+    global _cf_kv_namespace_id
+    if _cf_kv_namespace_id:
+        return _cf_kv_namespace_id
     headers = {"Authorization": f"Bearer {CF_API_TOKEN}"}
     # list
     r = requests.get(_kv_base(), headers=headers, timeout=15)
     if r.ok:
         for ns in r.json().get("result", []):
             if ns.get("title") == CF_KV_NAMESPACE_NAME:
-                CF_KV_NAMESPACE_ID = ns["id"]
-                print(f"[cf] Using existing KV '{CF_KV_NAMESPACE_NAME}' id={CF_KV_NAMESPACE_ID}")
-                return CF_KV_NAMESPACE_ID
+                _cf_kv_namespace_id = ns["id"]
+                print(f"[cf] Using existing KV '{CF_KV_NAMESPACE_NAME}' id={_cf_kv_namespace_id}")
+                return _cf_kv_namespace_id
     # create
     r = requests.post(_kv_base(), headers=headers, json={"title": CF_KV_NAMESPACE_NAME}, timeout=15)
     if not r.ok:
         raise SystemExit(f"Failed to create KV namespace: {r.status_code} {r.text[:200]}")
-    CF_KV_NAMESPACE_ID = r.json()["result"]["id"]
-    print(f"[cf] Created KV '{CF_KV_NAMESPACE_NAME}' id={CF_KV_NAMESPACE_ID}")
-    return CF_KV_NAMESPACE_ID
+    _cf_kv_namespace_id = r.json()["result"]["id"]
+    print(f"[cf] Created KV '{CF_KV_NAMESPACE_NAME}' id={_cf_kv_namespace_id}")
+    return _cf_kv_namespace_id
 
-def kv_url(key): return f"{_kv_base()}/{ensure_kv_namespace_id()}/values/{key}"
+def kv_url(key: str) -> str:
+    return f"{_kv_base()}/{ensure_kv_namespace_id()}/values/{key}"
 
-def kv_get(key):
+
+def kv_get(key: str) -> JSONDict | None:
     try:
         r = requests.get(kv_url(key), headers={"Authorization": f"Bearer {CF_API_TOKEN}"}, timeout=15)
         if r.status_code == 200:
@@ -86,7 +159,7 @@ def kv_get(key):
         print(f"[kv] GET error: {e}")
         return None
 
-def kv_put(key, data: dict) -> bool:
+def kv_put(key: str, data: JSONDict) -> bool:
     try:
         r = requests.put(
             kv_url(key),
@@ -118,7 +191,7 @@ def ia_has_episode_http(identifier: str) -> bool:
         return False
 
 # ---------- RSS fetch helpers ----------
-def _entry_from_feed(e):
+def _entry_from_feed(e: Any) -> EntryDict:
     link = getattr(e, "link", None) or getattr(e, "id", None)
     title = getattr(e, "title", link)
     plain_text, html_content, subtitle, lead_image = resolve_article_content(e, link, allow_fetch=False)
@@ -143,9 +216,8 @@ def _entry_from_feed(e):
     }
 
 
-def fetch_entries_from_rss(limit=None):
-    import feedparser
-
+def fetch_entries_from_rss(limit: int | None = None) -> list[EntryDict]:
+    feedparser = _get_feedparser()
     p = feedparser.parse(RSS_URL)
     if not p.entries:
         raise SystemExit("RSS has no entries")
@@ -156,37 +228,55 @@ def fetch_entries_from_rss(limit=None):
     return entries
 
 
-def update_latest_state_snapshot(state: dict):
+def update_latest_state_snapshot(state: JSONDict) -> None:
     """Maintain legacy top-level keys for backward compatibility."""
-    items = state.get("items", {}) or {}
-    latest = None
+    raw_items = state.get("items")
+    if not isinstance(raw_items, dict):
+        return
+    items = cast(StateItems, raw_items)
+    latest: JSONDict | None = None
     for data in items.values():
         pub = data.get("last_pub_utc")
-        if not pub:
+        if not isinstance(pub, str) or not pub:
             continue
-        if not latest or pub > latest.get("last_pub_utc", ""):
+        if latest is None:
+            latest = data
+            continue
+        latest_pub = str(latest.get("last_pub_utc") or "")
+        if pub > latest_pub:
             latest = data
     if latest:
         state["last_pub_utc"] = latest.get("last_pub_utc")
         state["rss_added"] = latest.get("rss_added")
         state["uploaded_url"] = latest.get("uploaded_url")
 
-def newest_sidecar():
+def newest_sidecar() -> str | None:
     sc = sorted(OUT.glob("*.mp3.rssmeta.json"), key=os.path.getmtime, reverse=True)
     return str(sc[0]) if sc else None
 
-def main():
+def main() -> None:
     if not RSS_URL:
         raise SystemExit("Missing RSS_URL")
 
     ensure_kv_namespace_id()
     state_key = f"feed:{SLUG}"
-    state = kv_get(state_key) or {}
-    items = state.setdefault("items", {})
-    usage = state.setdefault("usage", {"cumulative_characters": 0})
+    state = _ensure_json_dict(kv_get(state_key) or {})
+
+    raw_items_obj: object = state.setdefault("items", {})
+    if not isinstance(raw_items_obj, dict):
+        raw_items_obj = {}
+        state["items"] = raw_items_obj
+    items = cast(StateItems, raw_items_obj)
+
+    raw_usage_obj: object = state.setdefault("usage", {"cumulative_characters": 0})
+    if not isinstance(raw_usage_obj, dict):
+        raw_usage_obj = {"cumulative_characters": 0}
+        state["usage"] = raw_usage_obj
+    usage = cast(JSONDict, raw_usage_obj)
+
     state.setdefault("pending_deploy", False)
 
-    entries = fetch_entries_from_rss()
+    entries: list[EntryDict] = fetch_entries_from_rss()
     if not entries:
         raise SystemExit("RSS has no entries")
 
@@ -197,7 +287,7 @@ def main():
     if force_full_rescan:
         print("[info] PODCAST_FULL_RESCAN set; scanning entire feed")
     else:
-        candidates = []
+        candidates: list[EntryDict] = []
         for entry in entries:
             link = entry.get("article_link")
             entry_pub = entry.get("article_pub_utc", "")
@@ -227,7 +317,7 @@ def main():
             entries = candidates
             print(f"[info] Processing {len(entries)} new/changed RSS entries (out of {total_entries})")
         else:
-            entries = []
+            entries = cast(list[EntryDict], [])
             print("[info] No new RSS entries detected; skipping re-scan")
 
     feed_xml = os.getenv(
@@ -239,13 +329,13 @@ def main():
     feed_updated = False
     processed = False
     run_characters = 0
-    monthly_limit = int(os.getenv("TTS_MONTHLY_FREE_CHAR_LIMIT", "1000000"))
 
-    def estimate_characters(meta_like):
-        summary = meta_like.get("article_summary") or ""
+    def estimate_characters(meta_like: Mapping[str, Any]) -> int:
+        summary = str(meta_like.get("article_summary") or "")
         summary_clean = re.sub("<.*?>", "", summary)
-        subtitle = meta_like.get("article_subtitle") or ""
-        parts = [meta_like.get("article_title", ""), subtitle, summary_clean]
+        subtitle = str(meta_like.get("article_subtitle") or "")
+        title = str(meta_like.get("article_title", ""))
+        parts: list[str] = [title, subtitle, summary_clean]
         plain = "\n".join([p for p in parts if p]).strip()
         return len(plain)
 
@@ -256,9 +346,13 @@ def main():
             continue
 
         identifier = ia_identifier_for_link(link)
-        entry_state = items.get(identifier)
-        if not entry_state:
+        entry_state_obj = items.get(identifier)
+        if isinstance(entry_state_obj, dict):
+            entry_state = entry_state_obj
+        else:
             entry_state = {}
+
+        if not entry_state:
             legacy_pub = state.get("last_pub_utc")
             if legacy_pub and legacy_pub == entry["article_pub_utc"]:
                 entry_state.update(
@@ -268,7 +362,7 @@ def main():
                         "uploaded_url": state.get("uploaded_url"),
                     }
                 )
-            items[identifier] = entry_state
+        items[identifier] = entry_state
 
         entry_state.setdefault("article_title", entry["article_title"])
         entry_state.setdefault("article_link", link)
@@ -360,7 +454,7 @@ def main():
                 raise SystemExit("No sidecar found after generation")
 
         with open(sidecar_path, "r", encoding="utf-8") as f:
-            meta = json.load(f)
+            meta = cast(JSONDict, json.load(f))
 
         generated_this_run = meta.get("tts_generated", True)
         char_count = meta.get("tts_characters")
@@ -433,21 +527,27 @@ def main():
         try:
             from tts_usage import fetch_tts_usage
 
-            billing_usage = fetch_tts_usage()
-            summary = billing_usage.get("summary", {})
-            billing_used = summary.get("characters", 0)
+            billing_usage = cast(BillingUsage, fetch_tts_usage())
+            summary = _ensure_json_dict(billing_usage.get("summary"))
+            billing_used = int(summary.get("characters", 0) or 0)
             print("  Billing cycle: {:,} characters used".format(billing_used))
 
-            groups = {
-                (row.get("label") or ""): {
-                    "characters": row.get("characters", 0),
-                    "free_tier_remaining": row.get("free_tier_remaining", 0),
-                }
-                for row in billing_usage.get("by_group", [])
-            }
+            groups_data_input: object = billing_usage.get("by_group", [])
+            if isinstance(groups_data_input, list):
+                raw_groups: list[object] = cast(list[object], groups_data_input)
+            else:
+                raw_groups = []
+            groups: dict[str, BillingGroup] = {}
+            for raw_row in raw_groups:
+                row = _ensure_json_dict(raw_row)
+                label = str(row.get("label") or "")
+                groups[label] = BillingGroup(
+                    characters=int(row.get("characters", 0) or 0),
+                    free_tier_remaining=int(row.get("free_tier_remaining", 0) or 0),
+                )
 
-            standard = groups.get("standard", {"characters": 0, "free_tier_remaining": 0})
-            premium = groups.get("wavenet_or_neural2", {"characters": 0, "free_tier_remaining": 0})
+            standard = groups.get("standard") or _empty_billing_group()
+            premium = groups.get("wavenet_or_neural2") or _empty_billing_group()
 
             print(
                 "    Standard voices: used {:,} characters, {:,} free-tier remaining".format(
@@ -482,7 +582,7 @@ def main():
     else:
         print("Feed unchanged; skipping deploy")
 
-def deploy_pages():
+def deploy_pages() -> tuple[bool, bool]:
     # Optional automatic deploy to Cloudflare Pages with Wrangler
     if CF_API_TOKEN and CF_ACCOUNT_ID and CF_PAGES_PROJECT:
         if shutil.which("wrangler"):
