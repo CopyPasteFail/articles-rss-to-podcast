@@ -1,19 +1,75 @@
 #!/usr/bin/env python
-import os, re, sys, json, pathlib, datetime, html, io
+from __future__ import annotations
+
+import datetime
+import html
+import io
+import json
+import os
+import pathlib
+import re
+import sys
+from typing import Protocol, Sequence, TypedDict
+
 import feedparser
 from google.cloud import texttospeech
 from pydub import AudioSegment, effects
 
 from content_utils import resolve_article_content, text_to_html
 
+
+class EntryMeta(TypedDict):
+    link: str
+    title: str
+    article_text: str
+    article_html: str
+    article_subtitle: str
+    article_image_url: str
+    author: str
+    pub_utc: str
+
+
+class SidecarPayload(TypedDict):
+    article_title: str
+    article_summary: str
+    article_summary_html: str
+    article_subtitle: str
+    article_text: str
+    article_link: str
+    article_author: str
+    article_pub_utc: str
+    article_image_url: str
+    mp3_filename: str
+    mp3_local_path: str
+    tts_characters: int
+    tts_generated: bool
+
+class _TTSClient(Protocol):
+    def synthesize_speech(
+        self,
+        *,
+        input: texttospeech.SynthesisInput,
+        voice: texttospeech.VoiceSelectionParams,
+        audio_config: texttospeech.AudioConfig,
+    ) -> texttospeech.SynthesizeSpeechResponse: ...
+
+
 OUT = pathlib.Path(os.getenv("OUT_DIR", "./out"))
 VOICE = os.getenv("GCP_TTS_VOICE", "en-US-Standard-C")
-LANG  = os.getenv("GCP_TTS_LANG", "").strip()
-RATE  = float(os.getenv("GCP_TTS_RATE", "1.0"))
+LANG = os.getenv("GCP_TTS_LANG", "").strip()
+RATE = float(os.getenv("GCP_TTS_RATE", "1.0"))
 PITCH = float(os.getenv("GCP_TTS_PITCH", "0.0"))
 RSS_URL = os.getenv("RSS_URL", "")
 TARGET_LINK = os.getenv("TARGET_ENTRY_LINK", "").strip()
 TARGET_ID = os.getenv("TARGET_ENTRY_ID", "").strip()
+
+
+def _ensure_str(value: object, *, default: str = "") -> str:
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return default
+    return str(value)
 
 def slugify(url_or_title: str) -> str:
     base = url_or_title.strip()
@@ -21,10 +77,15 @@ def slugify(url_or_title: str) -> str:
     base = re.sub(r"[^a-zA-Z0-9]+", "-", base.lower()).strip("-")
     return base[:120] or "article"
 
-def feed_entry_to_meta(e, *, allow_fetch=False):
-    link = getattr(e, "link", None) or getattr(e, "id", None)
-    title = getattr(e, "title", link or "Article")
-    author = getattr(e, "author", "") or getattr(e, "creator", "") or ""
+
+def feed_entry_to_meta(e: object, *, allow_fetch: bool = False) -> EntryMeta:
+    link_source = getattr(e, "link", None) or getattr(e, "id", None)
+    link = _ensure_str(link_source)
+    title_value = getattr(e, "title", None)
+    title = _ensure_str(title_value, default=link or "Article")
+    author = _ensure_str(getattr(e, "author", None))
+    if not author:
+        author = _ensure_str(getattr(e, "creator", None))
     tstruct = getattr(e, "published_parsed", None) or getattr(e, "updated_parsed", None)
     if tstruct:
         pub_utc = datetime.datetime(*tstruct[:6], tzinfo=datetime.timezone.utc).isoformat()
@@ -32,42 +93,43 @@ def feed_entry_to_meta(e, *, allow_fetch=False):
         pub_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
     plain_text, html_content, subtitle, lead_image = resolve_article_content(e, link, allow_fetch=allow_fetch)
     if not plain_text:
-        plain_text = getattr(e, "summary", "") or getattr(e, "description", "") or title
+        plain_text = _ensure_str(getattr(e, "summary", None)) or _ensure_str(getattr(e, "description", None)) or title
     if not html_content and plain_text:
         html_content = text_to_html(plain_text)
     if not subtitle:
         subtitle = ""
-    return {
-        "link": link,
-        "title": title,
-        "article_text": plain_text,
-        "article_html": html_content,
-        "article_subtitle": subtitle,
-        "article_image_url": lead_image,
-        "author": author,
-        "pub_utc": pub_utc,
-    }
+    return EntryMeta(
+        link=link,
+        title=title,
+        article_text=plain_text,
+        article_html=html_content,
+        article_subtitle=subtitle,
+        article_image_url=lead_image,
+        author=author,
+        pub_utc=pub_utc,
+    )
 
 
-def select_entry():
-    p = feedparser.parse(RSS_URL)
-    if not p.entries:
+def select_entry() -> EntryMeta:
+    parsed: feedparser.FeedParserDict = feedparser.parse(RSS_URL)
+    entries: list[object] = list(parsed.entries)
+    if not entries:
         sys.exit("RSS has no entries")
 
-    def matches_target(entry):
-        link = getattr(entry, "link", None) or ""
-        entry_id = getattr(entry, "id", None) or ""
+    def matches_target(entry: object) -> bool:
+        link = _ensure_str(getattr(entry, "link", None))
+        entry_id = _ensure_str(getattr(entry, "id", None))
         if TARGET_LINK and link == TARGET_LINK:
             return True
         if TARGET_ID and entry_id == TARGET_ID:
             return True
         return False
 
-    target = next((e for e in p.entries if matches_target(e)), None)
+    target = next((entry for entry in entries if matches_target(entry)), None)
     if not target:
         if TARGET_LINK or TARGET_ID:
             print("Target entry not found in feed - falling back to latest")
-        target = p.entries[0]
+        target = entries[0]
     return feed_entry_to_meta(target, allow_fetch=True)
 
 
@@ -79,8 +141,8 @@ def _chunk_paragraph(text: str, limit: int) -> list[str]:
     words = text.split()
     if not words:
         return [text]
-    chunks = []
-    current = []
+    chunks: list[str] = []
+    current: list[str] = []
     current_len = 0
     for word in words:
         addition = len(word) + (1 if current else 0)
@@ -97,7 +159,7 @@ def _chunk_paragraph(text: str, limit: int) -> list[str]:
 
 
 def _normalize_paragraphs(paragraphs: list[str]) -> list[str]:
-    normalized = []
+    normalized: list[str] = []
     for para in paragraphs:
         para = para.strip()
         if not para:
@@ -109,7 +171,7 @@ def _normalize_paragraphs(paragraphs: list[str]) -> list[str]:
     return normalized or paragraphs
 
 
-def _mk_segment(title: str, paras: list[str], include_title: bool) -> str:
+def _mk_segment(title: str, paras: Sequence[str], include_title: bool) -> str:
     parts = ["<speak>"]
     if include_title:
         parts.append(f"<p>{html.escape(title)}</p>")
@@ -119,31 +181,26 @@ def _mk_segment(title: str, paras: list[str], include_title: bool) -> str:
     return "\n".join(parts)
 
 
-def render_ssml(meta):
+def render_ssml(meta: EntryMeta) -> tuple[list[str], int]:
     """Return SSML payload segments and character count."""
     title = meta["title"]
-    body_text = meta.get("article_text") or ""
-    if not body_text:
-        body_text = meta.get("article_html") or ""
-    body_text = body_text.strip()
+    body_text = (meta.get("article_text") or meta.get("article_html") or "").strip()
     paragraphs = [p.strip() for p in re.split(r"\n{2,}", body_text) if p.strip()]
     if not paragraphs:
         paragraphs = [p.strip() for p in body_text.splitlines() if p.strip()]
-    paragraphs = _normalize_paragraphs(paragraphs)
+    normalized_paragraphs = _normalize_paragraphs(paragraphs)
     subtitle = meta.get("article_subtitle") or ""
-    speech_paragraphs = paragraphs
+    speech_paragraphs: list[str] = normalized_paragraphs
     if subtitle:
-        speech_paragraphs = [subtitle.strip()] + paragraphs
-    plain_text = "\n".join([title] + speech_paragraphs).strip()
-    if not plain_text:
-        plain_text = title
+        speech_paragraphs = [subtitle.strip()] + normalized_paragraphs
+    plain_text = "\n".join([title] + speech_paragraphs).strip() or title
     char_count = len(plain_text)
 
-    segments = []
+    segments: list[str] = []
     current: list[str] = []
     include_title = True
 
-    def flush_current(curr, include_title_flag):
+    def flush_current(curr: Sequence[str], include_title_flag: bool) -> None:
         if not curr and include_title_flag:
             return
         segments.append(_mk_segment(title, curr, include_title_flag))
@@ -155,7 +212,7 @@ def render_ssml(meta):
             if not current:
                 # paragraph alone is too big -> split harder
                 sub_chunks = _chunk_paragraph(para, MAX_PARAGRAPH_CHARS)
-                buffer = []
+                buffer: list[str] = []
                 for idx, chunk in enumerate(sub_chunks):
                     trial_chunk = buffer + [chunk]
                     chunk_ssml = _mk_segment(title, trial_chunk, include_title)
@@ -191,8 +248,8 @@ def render_ssml(meta):
 
     return segments, char_count
 
-def synthesize_ssml(ssml_segments, out_path: pathlib.Path):
-    client = texttospeech.TextToSpeechClient()
+def synthesize_ssml(ssml_segments: Sequence[str], out_path: pathlib.Path) -> None:
+    client: _TTSClient = texttospeech.TextToSpeechClient()
     name = VOICE
     lang = LANG
 
@@ -213,7 +270,7 @@ def synthesize_ssml(ssml_segments, out_path: pathlib.Path):
         speaking_rate=RATE,
         pitch=PITCH,
     )
-    combined_audio = None
+    combined_audio: AudioSegment | None = None
     for idx, ssml in enumerate(ssml_segments):
         input_ssml = texttospeech.SynthesisInput(ssml=ssml)
         resp = client.synthesize_speech(input=input_ssml, voice=voice, audio_config=audio_config)
@@ -222,15 +279,17 @@ def synthesize_ssml(ssml_segments, out_path: pathlib.Path):
         print(f"Segment {idx+1}/{len(ssml_segments)} bytes={len(resp.audio_content)}")
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    if combined_audio is None:
+        raise RuntimeError("TTS synthesis produced no audio segments")
     combined_audio.export(out_path, format="mp3")
     print(f"Voice: {name}  Lang: {lang}")
 
-def normalize_mp3(path: pathlib.Path):
+def normalize_mp3(path: pathlib.Path) -> None:
     audio = AudioSegment.from_file(path)
     audio = effects.normalize(audio)
     audio.export(path, format="mp3")
 
-def main():
+def main() -> None:
     if not RSS_URL:
         sys.exit("Missing RSS_URL")
 
@@ -255,7 +314,7 @@ def main():
         print(f"Characters billed (approx): {char_count}")
 
     sidecar = mp3_path.with_suffix(".mp3.rssmeta.json")
-    side = {
+    side: SidecarPayload = {
         "article_title": e["title"],
         "article_summary": e.get("article_text") or "",
         "article_summary_html": e.get("article_html") or "",
