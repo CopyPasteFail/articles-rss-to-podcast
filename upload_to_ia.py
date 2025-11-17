@@ -1,6 +1,50 @@
 #!/usr/bin/env python
-import os, sys, pathlib, hashlib, json
+import os, sys, pathlib, hashlib, json, time
 import internetarchive
+import requests
+
+RETRYABLE_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
+
+
+def should_retry(exc: requests.exceptions.RequestException) -> bool:
+    """Decide whether the raised request exception is safe to retry."""
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if isinstance(exc, requests.exceptions.HTTPError):
+        return status in RETRYABLE_STATUS_CODES
+    return isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.Timeout))
+
+
+def retry_delay(attempt: int, response) -> float:
+    """Return the number of seconds to wait before the next retry, starting at ~5s and doubling per attempt (capped at 60s) while honoring Retry-After when present."""
+    base = min(5 * (2 ** (attempt - 1)), 60)
+    headers = getattr(response, "headers", {})
+    retry_after = headers.get("Retry-After") if headers else None
+    if retry_after:
+        try:
+            retry_after = float(retry_after)
+            base = max(base, retry_after)
+        except (TypeError, ValueError):
+            pass
+    return base
+
+
+def upload_with_retries(item, files, *, metadata, verbose=False, max_attempts=5):
+    """Upload files to IA, retrying transient errors with exponential backoff, delaying between attempts via retry_delay so we slow down when IA asks us to."""
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return item.upload(files, metadata=metadata, verbose=verbose)
+        except requests.exceptions.RequestException as exc:
+            if not should_retry(exc) or attempt == max_attempts:
+                raise
+            response = getattr(exc, "response", None)
+            status = getattr(response, "status_code", "?")
+            wait = retry_delay(attempt, response)
+            print(
+                f"Upload attempt {attempt} failed with status {status}: {exc}. "
+                f"Retrying in {wait:.1f}s..."
+            )
+            time.sleep(wait)
 
 def read_sidecar(mp3_path: pathlib.Path) -> dict:
     sidecar = mp3_path.with_suffix(mp3_path.suffix + ".rssmeta.json")
@@ -47,7 +91,13 @@ def main():
     print(f"{'Replacing' if replacing else 'Creating'} {remote_name} in {identifier}\n")
 
     to_upload = {remote_name: str(mp3_path)}
-    result = item.upload(to_upload, metadata={
+    max_attempts = os.getenv("IA_UPLOAD_RETRIES", "5")
+    try:
+        max_attempts = int(max_attempts)
+    except ValueError:
+        max_attempts = 5
+    max_attempts = max(1, max_attempts)
+    result = upload_with_retries(item, to_upload, metadata={
         "title": meta["article_title"],
         "mediatype": "audio",
         "language": "und",
@@ -55,7 +105,7 @@ def main():
         "description": "Auto-generated TTS episode",
         "subject": "podcast;tts;articles",
         "external-identifier": meta.get("article_link",""),
-    }, verbose=True)
+    }, verbose=True, max_attempts=max_attempts)
 
     ok = all(getattr(r, "ok", False) for r in result)
     if not ok:
