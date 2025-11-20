@@ -18,6 +18,11 @@ from typing import Any, Protocol, TypedDict, cast
 
 import requests
 
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
+
 from content_utils import resolve_article_content, text_to_html
 
 StrPath = str | os.PathLike[str]
@@ -103,21 +108,34 @@ SLUG = os.getenv("PODCAST_SLUG", "default").strip()
 RSS_URL = os.getenv("RSS_URL", "").strip()
 
 def sh(*args: object, env: Mapping[str, str] | None = None, cwd: StrPath | None = None) -> str:
-    """Run a subprocess while echoing commands so the long pipeline stays observable."""
+    """Run a subprocess, streaming output live while still capturing it for parsing."""
     print("→", " ".join(map(str, args)))
+    env_map = os.environ.copy()
+    if env:
+        env_map.update(env)
+    env_map.setdefault("PYTHONUNBUFFERED", "1")
+    proc = subprocess.Popen(
+        list(map(str, args)),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=env_map,
+        cwd=cwd,
+        bufsize=1,
+    )
+    assert proc.stdout is not None  # appease type checkers
+    out_lines: list[str] = []
     try:
-        out = subprocess.check_output(
-            list(map(str, args)),
-            text=True,
-            stderr=subprocess.STDOUT,
-            env=env,
-            cwd=cwd,
-        )
-        print(out.strip())
-        return out
-    except subprocess.CalledProcessError as e:
-        print(e.output.strip())
-        raise
+        for line in proc.stdout:
+            print(line.rstrip())
+            out_lines.append(line)
+    finally:
+        proc.stdout.close()
+    proc.wait()
+    out = "".join(out_lines)
+    if proc.returncode:
+        raise subprocess.CalledProcessError(proc.returncode, args, out)
+    return out
 
 
 def git_info() -> tuple[str | None, str | None]:
