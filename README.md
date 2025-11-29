@@ -42,7 +42,7 @@ $EDITOR .env    # set GOOGLE_APPLICATION_CREDENTIALS, CLOUDFLARE_*, IA_* etc.
 
 ### 3) Create configs/<your-feed>.env (see example below)
 
-### 3) Prepare NVM
+### 4) Prepare NVM
 
 ```bash
 nvm install 20.19.4
