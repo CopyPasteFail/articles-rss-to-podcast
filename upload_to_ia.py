@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import pathlib
+import random
 import sys
 import time
 from typing import Any, Iterable, Mapping, MutableMapping, Protocol, Sequence, cast
@@ -47,7 +48,12 @@ class ArchiveItem(Protocol):
 class ArchiveSession(Protocol):
     """internetarchive.get_session interface (real or mocked)."""
 
-    def get_item(self, identifier: str) -> ArchiveItem:
+    def get_item(
+        self,
+        identifier: str,
+        item_metadata: Mapping[str, Any] | None = None,
+        request_kwargs: MutableMapping[str, Any] | None = None,
+    ) -> ArchiveItem:
         ...
 
 
@@ -84,11 +90,19 @@ def should_retry(exc: requests.exceptions.RequestException) -> bool:
 def retry_delay(attempt: int, response: requests.Response | None) -> float:
     """Return the number of seconds to wait before the next retry.
 
-    Starts at ~10s and doubles per attempt (capped at 300s), honoring Retry-After
-    headers and inflating the delay when IA tells us explicitly to slow down so
-    we back off hard from global queue rate limits.
+    Starts at ~10s and doubles per attempt (capped at 300s normally), honoring
+    Retry-After headers. When IA says "slow down"/"reduce your request rate",
+    we start at 5 minutes and double up to ~20 minutes to respect their queue
+    limits. Adds a little jitter so concurrent uploads do not retry in lockstep.
     """
     base = min(10 * (2 ** (attempt - 1)), 300)
+    body = getattr(response, "text", "") if response is not None else ""
+    slow_down = isinstance(body, str) and (
+        "slow down" in body.lower() or "reduce your request rate" in body.lower()
+    )
+    if slow_down:
+        # Start at 5 minutes and double, capped at 20 minutes, when IA tells us to back off.
+        base = min(max(base, 300 * (2 ** (attempt - 1))), 1200)
     headers: Mapping[str, str] | None = getattr(response, "headers", None)
     retry_after = headers.get("Retry-After") if headers else None
     if retry_after:
@@ -97,14 +111,7 @@ def retry_delay(attempt: int, response: requests.Response | None) -> float:
             base = max(base, retry_after)
         except (TypeError, ValueError):
             pass
-    # Some IA 503 responses include a "Slow Down" / "reduce your request rate"
-    # hint in the body without a Retry-After header; honor that with a longer wait.
-    body = getattr(response, "text", "") if response is not None else ""
-    if isinstance(body, str) and (
-        "slow down" in body.lower() or "reduce your request rate" in body.lower()
-    ):
-        base = max(base, 120.0)
-    return base
+    return base * random.uniform(0.9, 1.1)
 
 
 def wait_with_progress(seconds: float) -> None:
@@ -163,6 +170,38 @@ def upload_with_retries(
     # This point should be unreachable, but keep mypy/Pylance happy.
     raise RuntimeError("upload_with_retries exhausted without returning or raising")
 
+
+def get_item_with_retries(
+    session: ArchiveSession,
+    identifier: str,
+    *,
+    max_attempts: int,
+    request_kwargs: Mapping[str, Any],
+) -> ArchiveItem:
+    """Fetch item metadata with retries so occasional IA timeouts don't fail the pipeline."""
+    for attempt in range(1, max_attempts + 1):
+        try:
+            print(
+                f"Metadata attempt {attempt}/{max_attempts} with timeout "
+                f"{request_kwargs.get('timeout', 'default')}...",
+                flush=True,
+            )
+            return session.get_item(identifier, request_kwargs=dict(request_kwargs))
+        except requests.exceptions.RequestException as exc:
+            if not should_retry(exc) or attempt == max_attempts:
+                raise
+            response: requests.Response | None = getattr(exc, "response", None)
+            status = getattr(response, "status_code", "?")
+            wait = retry_delay(attempt, response)
+            print(
+                f"Metadata attempt {attempt} failed with status {status}: {exc}. "
+                f"Retrying in {wait:.1f}s...",
+                flush=True,
+            )
+            wait_with_progress(wait)
+    raise RuntimeError("get_item_with_retries exhausted without returning or raising")
+
+
 def read_sidecar(mp3_path: pathlib.Path) -> dict[str, Any]:
     """Load the JSON metadata produced alongside the MP3."""
     sidecar = mp3_path.with_suffix(mp3_path.suffix + ".rssmeta.json")
@@ -202,16 +241,6 @@ def main() -> None:
     identifier = link_id(meta["article_link"])
     remote_name = "episode.mp3"
 
-    session = get_ia_session()
-    item: ArchiveItem = session.get_item(identifier)
-
-    try:
-        replacing = any(f.name == remote_name for f in item.get_files())
-    except Exception:
-        replacing = False
-    print(f"{'Replacing' if replacing else 'Creating'} {remote_name} in {identifier}\n")
-
-    to_upload = {remote_name: str(mp3_path)}
     max_attempts_env = os.getenv("IA_UPLOAD_RETRIES", "8")
     try:
         max_attempts = int(max_attempts_env)
@@ -229,6 +258,22 @@ def main() -> None:
         f"read={request_kwargs['timeout'][1]}s\n",
         flush=True,
     )
+
+    session = get_ia_session()
+    item: ArchiveItem = get_item_with_retries(
+        session,
+        identifier,
+        max_attempts=max_attempts,
+        request_kwargs=request_kwargs,
+    )
+
+    try:
+        replacing = any(f.name == remote_name for f in item.get_files())
+    except Exception:
+        replacing = False
+    print(f"{'Replacing' if replacing else 'Creating'} {remote_name} in {identifier}\n")
+
+    to_upload = {remote_name: str(mp3_path)}
     result: Sequence[UploadResponse] = upload_with_retries(item, to_upload, metadata={
         "title": meta["article_title"],
         "mediatype": "audio",
