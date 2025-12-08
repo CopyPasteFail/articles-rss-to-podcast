@@ -10,9 +10,13 @@ import json
 import os
 import pathlib
 import re
+import random
+import random
 import shutil
 import subprocess
 import sys
+import tempfile
+import time
 from collections.abc import Mapping
 from typing import Any, Protocol, TypedDict, cast
 
@@ -195,22 +199,86 @@ def kv_get(key: str) -> JSONDict | None:
         print(f"[kv] GET error: {e}")
         return None
 
-def kv_put(key: str, data: JSONDict) -> bool:
-    """Store mutable pipeline state back into Cloudflare KV."""
+def kv_put_via_wrangler(key: str, data: JSONDict) -> bool:
+    """Fallback KV writer using wrangler CLI when direct API calls keep timing out."""
+    if not shutil.which("wrangler"):
+        return False
+
+    tmp_path: str | None = None
     try:
-        r = requests.put(
-            kv_url(key),
-            headers={"Authorization": f"Bearer {CF_API_TOKEN}", "Content-Type": "application/json"},
-            data=json.dumps(data, ensure_ascii=False),
-            timeout=15,
-        )
-        if r.status_code in (200, 204):
+        tmp = tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8")
+        with tmp:
+            json.dump(data, tmp, ensure_ascii=False)
+            tmp_path = tmp.name
+
+        ns_id = ensure_kv_namespace_id()
+        cmd = [
+            "wrangler",
+            "kv",
+            "key",
+            "put",
+            "--remote",
+            "--namespace-id",
+            ns_id,
+            key,
+            "--path",
+            tmp_path,
+        ]
+        print(f"[kv] Falling back to wrangler for {key} (namespace {ns_id})")
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode == 0:
+            print(f"[kv] Wrangler PUT {key} ok")
             return True
-        print(f"[kv] PUT {key} -> {r.status_code} {r.text[:200]}")
-        return False
+        err_out = proc.stderr.strip() or proc.stdout.strip()
+        print(f"[kv] Wrangler put failed ({proc.returncode}): {err_out}")
     except Exception as e:
-        print(f"[kv] PUT error: {e}")
-        return False
+        print(f"[kv] Wrangler put error: {e}")
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+    return False
+
+
+def kv_put(key: str, data: JSONDict) -> bool:
+    """Store mutable pipeline state back into Cloudflare KV with simple retries/backoff, then wrangler fallback."""
+    attempts = 4
+    backoff_s = 2.0
+    base_timeout = 15.0
+    for attempt in range(1, attempts + 1):
+        try:
+            timeout = base_timeout * (2 ** (attempt - 1))
+            r = requests.put(
+                kv_url(key),
+                headers={"Authorization": f"Bearer {CF_API_TOKEN}", "Content-Type": "application/json"},
+                data=json.dumps(data, ensure_ascii=False),
+                timeout=timeout,
+            )
+            if r.status_code in (200, 204):
+                print(f"[kv] PUT {key} ok (attempt {attempt}, timeout={timeout}s)")
+                return True
+            print(f"[kv] PUT {key} -> {r.status_code} {r.text[:200]}")
+        except Exception as e:
+            print(f"[kv] PUT error attempt {attempt}/{attempts}: {e}")
+
+        if attempt < attempts:
+            delay = max(0.5, backoff_s * (2 ** (attempt - 1)))
+            jitter = delay * 0.25
+            delay += random.uniform(-jitter, jitter)
+            print(f"[kv] Retry {attempt + 1}/{attempts} in {delay:.1f}s...")
+            time.sleep(delay)
+
+    # Last-resort fallback via wrangler CLI (uses local auth config / env)
+    return kv_put_via_wrangler(key, data)
+
+
+def kv_put_or_die(key: str, data: JSONDict) -> None:
+    """Fail fast if we cannot persist state to KV, to avoid duplicate processing."""
+    if kv_put(key, data):
+        return
+    raise SystemExit("KV update failed; aborting to avoid duplicates")
 
 # ---------- IA helpers ----------
 def link_hash(link: str) -> str:
@@ -466,7 +534,7 @@ def main() -> None:
             )
             state["pending_deploy"] = True
             update_latest_state_snapshot(state)
-            kv_put(state_key, state)
+            kv_put_or_die(state_key, state)
 
             feed_updated = True
             processed = True
@@ -548,7 +616,7 @@ def main() -> None:
             run_characters += char_count
         state["pending_deploy"] = True
         update_latest_state_snapshot(state)
-        kv_put(state_key, state)
+        kv_put_or_die(state_key, state)
 
         feed_updated = True
         processed = True
@@ -616,10 +684,10 @@ def main() -> None:
         ran, success = deploy_pages()
         if ran and success:
             state["pending_deploy"] = False
-            kv_put(state_key, state)
+            kv_put_or_die(state_key, state)
         else:
             state["pending_deploy"] = True
-            kv_put(state_key, state)
+            kv_put_or_die(state_key, state)
             if ran:
                 print("Deploy failed; will retry on next run")
             else:

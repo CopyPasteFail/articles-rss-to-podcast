@@ -5,3 +5,6 @@ out/
 public/feeds/
 tts-key.json
 .env
+.wrangler/
+.cache/
+.mf/
