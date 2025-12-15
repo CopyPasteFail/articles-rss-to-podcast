@@ -10,3 +10,4 @@ mutagen==1.47.0
 python-dotenv==1.0.1
 internetarchive==3.6.0
 feedgen==0.9.0
+audioop-lts==0.2.1
