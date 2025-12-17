@@ -254,6 +254,7 @@ GOOGLE_APPLICATION_CREDENTIALS=./tts-key.json
 # Internet Archive
 IA_ACCESS_KEY=your_ia_access_key
 IA_SECRET_KEY=your_ia_secret_key
+IA_ID_PREFIX=optional_custom_prefix
 
 # Cloudflare
 CLOUDFLARE_API_TOKEN=your_cf_api_token
@@ -265,6 +266,8 @@ CF_KV_NAMESPACE_ID=your_kv_namespace_id
 # Defaults
 OUT_DIR=./out
 ```
+
+`IA_ID_PREFIX` overrides the Internet Archive identifier prefix when you want a custom namespace (defaults to `PODCAST_SLUG`).
 
 Helpful references:
 - Product overview: https://cloud.google.com/text-to-speech
@@ -536,6 +539,7 @@ These change over time. Always check the official pages.
 - MP3 not uploaded: run `ia configure` again and test `ia upload test-item ./README.md`.
 - Pages deploy errors: run `wrangler login` and confirm `CF_PAGES_PROJECT`. Try `wrangler pages project list`.
 - KV writes fail: reissue the API token with Workers KV Storage Edit. Confirm the namespace name matches `CF_KV_NAMESPACE_NAME`.
+- IA item blocked/offline: run `python scripts/reset_episode.py <slug> <article_link>` to drop the KV/local state, then rerun the feed. If IA keeps rejecting the old identifier, set `IA_ID_PREFIX=<new-prefix>` in `configs/<slug>.env` to upload under a fresh namespace.
 - Podcast apps do not show new episodes: purge the feed URL and remember that apps poll on their own schedules.
 
 ---

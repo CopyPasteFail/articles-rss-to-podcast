@@ -15,6 +15,9 @@ from typing import Any, Iterable, Mapping, MutableMapping, Protocol, Sequence, c
 import internetarchive
 import requests
 
+SLUG = os.getenv("PODCAST_SLUG", "default").strip()
+IA_ID_PREFIX = os.getenv("IA_ID_PREFIX", SLUG).strip() or SLUG
+
 
 class UploadResponse(Protocol):
     """Subset of the IA response that matters for our success checks."""
@@ -212,9 +215,8 @@ def read_sidecar(mp3_path: pathlib.Path) -> dict[str, Any]:
 
 def link_id(link: str) -> str:
     """Generate deterministic IA identifiers per-article so reruns overwrite safely."""
-    slug = os.getenv("PODCAST_SLUG", "default")
     h = hashlib.sha1(link.encode("utf-8")).hexdigest()[:16]
-    return f"tts-{slug}-{h}"
+    return f"tts-{IA_ID_PREFIX}-{h}"
 
 def get_ia_session() -> ArchiveSession:
     """Decide whether to use explicit env credentials or fall back to local config."""

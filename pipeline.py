@@ -17,13 +17,16 @@ import subprocess
 import sys
 import tempfile
 import time
+import io
 from collections.abc import Mapping
 from typing import Any, Protocol, TypedDict, cast
 
 import requests
 
 try:
-    sys.stdout.reconfigure(line_buffering=True)
+    stdout = sys.stdout
+    if isinstance(stdout, io.TextIOWrapper):
+        stdout.reconfigure(line_buffering=True)
 except Exception:
     pass
 
@@ -109,6 +112,7 @@ CF_KV_NAMESPACE_NAME = os.getenv("CF_KV_NAMESPACE_NAME", "tts-podcast-state").st
 _cf_kv_namespace_id = os.getenv("CF_KV_NAMESPACE_ID", "").strip()
 
 SLUG = os.getenv("PODCAST_SLUG", "default").strip()
+IA_ID_PREFIX = os.getenv("IA_ID_PREFIX", SLUG).strip() or SLUG
 RSS_URL = os.getenv("RSS_URL", "").strip()
 
 def sh(*args: object, env: Mapping[str, str] | None = None, cwd: StrPath | None = None) -> str:
@@ -118,8 +122,9 @@ def sh(*args: object, env: Mapping[str, str] | None = None, cwd: StrPath | None 
     if env:
         env_map.update(env)
     env_map.setdefault("PYTHONUNBUFFERED", "1")
+    cmd = [str(a) for a in args]
     proc = subprocess.Popen(
-        list(map(str, args)),
+        cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -138,7 +143,7 @@ def sh(*args: object, env: Mapping[str, str] | None = None, cwd: StrPath | None 
     proc.wait()
     out = "".join(out_lines)
     if proc.returncode:
-        raise subprocess.CalledProcessError(proc.returncode, args, out)
+        raise subprocess.CalledProcessError(proc.returncode, cmd, out)
     return out
 
 
@@ -287,7 +292,7 @@ def link_hash(link: str) -> str:
 
 def ia_identifier_for_link(link: str) -> str:
     """Namespace the link hash so uploads land under unique IA identifiers."""
-    return f"tts-{SLUG}-{link_hash(link)[:16]}"
+    return f"tts-{IA_ID_PREFIX}-{link_hash(link)[:16]}"
 
 def ia_has_episode_http(identifier: str) -> bool:
     """Quickly check whether IA already hosts audio for this entry."""
