@@ -117,6 +117,26 @@ _cf_kv_namespace_id = os.getenv("CF_KV_NAMESPACE_ID", "").strip()
 SLUG = os.getenv("PODCAST_SLUG", "default").strip()
 IA_ID_PREFIX = os.getenv("IA_ID_PREFIX", SLUG).strip() or SLUG
 RSS_URL = os.getenv("RSS_URL", "").strip()
+FAILURE_MESSAGE_MAX_CHARS = 500
+FAILURE_TRUNCATION_SUFFIX = "...[truncated]"
+FAILED_ENTRY_AT_UTC_KEY = "last_failure_at_utc"
+FAILED_ENTRY_PUB_UTC_KEY = "last_failure_pub_utc"
+FAILED_ENTRY_STEP_KEY = "last_failure_step"
+FAILED_ENTRY_MESSAGE_KEY = "last_failure_message"
+FAILED_ENTRY_IDENTIFIER_KEY = "last_failure_identifier"
+FAILED_ENTRY_LINK_KEY = "last_failure_link"
+FAILED_ENTRY_KEYS = (
+    FAILED_ENTRY_AT_UTC_KEY,
+    FAILED_ENTRY_PUB_UTC_KEY,
+    FAILED_ENTRY_STEP_KEY,
+    FAILED_ENTRY_MESSAGE_KEY,
+    FAILED_ENTRY_IDENTIFIER_KEY,
+    FAILED_ENTRY_LINK_KEY,
+)
+FAILURE_STEP_GENERATE_AUDIO = "one_episode"
+RETRY_FAILED_ENV_NAME = "PODCAST_RETRY_FAILED"
+RETRY_FAILED_VALUES = {"1", "true", "yes", "y"}
+
 
 def sh(*args: object, env: Mapping[str, str] | None = None, cwd: StrPath | None = None) -> str:
     """Run a subprocess, streaming output live while still capturing it for parsing."""
@@ -148,6 +168,90 @@ def sh(*args: object, env: Mapping[str, str] | None = None, cwd: StrPath | None 
     if proc.returncode:
         raise subprocess.CalledProcessError(proc.returncode, cmd, out)
     return out
+
+
+def _truncate_text(value: str, limit: int) -> str:
+    """Clamp long strings so persisted error messages stay readable and bounded.
+
+    Inputs: value string and max length limit.
+    Outputs: original string or truncated string with a suffix.
+    Edge cases: empty strings, non-positive limits, already-short values.
+    """
+    if limit <= 0:
+        return ""
+    if len(value) <= limit:
+        return value
+    suffix = FAILURE_TRUNCATION_SUFFIX
+    if limit <= len(suffix):
+        return suffix[:limit]
+    max_prefix_len = limit - len(suffix)
+    trimmed = value[:max_prefix_len].rstrip()
+    return f"{trimmed}{suffix}"
+
+
+def _is_retry_failed_enabled() -> bool:
+    """Check whether the caller wants to retry entries marked as failed.
+
+    Inputs: none (reads RETRY_FAILED_ENV_NAME from the environment).
+    Outputs: True when retries are enabled, otherwise False.
+    Edge cases: unset or blank env var, mixed-case truthy values.
+    """
+    raw_value = os.getenv(RETRY_FAILED_ENV_NAME, "").strip().lower()
+    return raw_value in RETRY_FAILED_VALUES
+
+
+def _should_skip_failed_entry(
+    entry_state: JSONDict,
+    entry_pub_utc: str,
+    retry_failed_entries: bool,
+) -> bool:
+    """Determine whether to skip a previously failed entry for the same publication time.
+
+    Inputs: entry_state dict, entry_pub_utc string, and retry flag.
+    Outputs: True when the entry should be skipped, False otherwise.
+    Edge cases: missing failure metadata, empty publication timestamps.
+    """
+    if retry_failed_entries:
+        return False
+    last_failed_pub = str(entry_state.get(FAILED_ENTRY_PUB_UTC_KEY, ""))
+    return bool(last_failed_pub and entry_pub_utc and last_failed_pub == entry_pub_utc)
+
+
+def _record_entry_failure(
+    entry_state: JSONDict,
+    *,
+    identifier: str,
+    link: str,
+    entry_pub_utc: str,
+    step: str,
+    message: str,
+) -> None:
+    """Annotate entry_state with failure metadata for later diagnostics and skipping.
+
+    Inputs: entry_state dict (mutated), identifier, link, entry_pub_utc, step name, message.
+    Outputs: None (mutates entry_state in place).
+    Edge cases: empty message or timestamps; caller is responsible for persistence.
+    Atomicity: not thread-safe; caller must persist in KV after mutation.
+    """
+    failure_timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    entry_state[FAILED_ENTRY_AT_UTC_KEY] = failure_timestamp
+    entry_state[FAILED_ENTRY_PUB_UTC_KEY] = entry_pub_utc
+    entry_state[FAILED_ENTRY_STEP_KEY] = step
+    entry_state[FAILED_ENTRY_MESSAGE_KEY] = message
+    entry_state[FAILED_ENTRY_IDENTIFIER_KEY] = identifier
+    entry_state[FAILED_ENTRY_LINK_KEY] = link
+
+
+def _clear_entry_failure(entry_state: JSONDict) -> None:
+    """Remove any stored failure metadata after a successful processing run.
+
+    Inputs: entry_state dict (mutated).
+    Outputs: None (removes keys when present).
+    Edge cases: keys already absent; no error raised.
+    Atomicity: not thread-safe; caller must persist in KV after mutation.
+    """
+    for key in FAILED_ENTRY_KEYS:
+        entry_state.pop(key, None)
 
 
 def git_info() -> tuple[str | None, str | None]:
@@ -459,6 +563,7 @@ def main() -> None:
     feed_updated = False
     processed = False
     run_characters = 0
+    retry_failed_entries = _is_retry_failed_enabled()
 
     def estimate_characters(meta_like: Mapping[str, Any]) -> int:
         """Approximate characters for billing before we run expensive TTS work."""
@@ -516,6 +621,16 @@ def main() -> None:
         print(f"  IA has audio: {ia_present}")
         print(f"  feed already updated: {already_in_feed}")
 
+        if _should_skip_failed_entry(entry_state, entry["article_pub_utc"], retry_failed_entries):
+            last_failed_at = entry_state.get(FAILED_ENTRY_AT_UTC_KEY, "")
+            last_failed_step = entry_state.get(FAILED_ENTRY_STEP_KEY, "")
+            print(
+                "  → Skipping previously failed entry "
+                f"(last_failure_at={last_failed_at}, step={last_failed_step})"
+            )
+            print(f"  → Set {RETRY_FAILED_ENV_NAME}=1 to retry this entry")
+            continue
+
         if ia_present and last_pub == entry["article_pub_utc"] and already_in_feed:
             print("  → Skipping (already processed)")
             continue
@@ -550,6 +665,7 @@ def main() -> None:
                     "article_image_url": entry.get("article_image_url", ""),
                 }
             )
+            _clear_entry_failure(entry_state)
             state["pending_deploy"] = True
             update_latest_state_snapshot(state)
             kv_put_or_die(state_key, state)
@@ -572,7 +688,30 @@ def main() -> None:
         print("  → Generating audio")
         env = os.environ.copy()
         env["TARGET_ENTRY_LINK"] = link or ""
-        out1 = sh(PY, str(ROOT / "one_episode.py"), env=env)
+        try:
+            out1 = sh(PY, str(ROOT / "one_episode.py"), env=env)
+        except subprocess.CalledProcessError as exc:
+            output_text = getattr(exc, "output", "") or ""
+            if not isinstance(output_text, str):
+                output_text = str(output_text)
+            failure_message = output_text.strip() or str(exc)
+            failure_message = _truncate_text(failure_message, FAILURE_MESSAGE_MAX_CHARS)
+            _record_entry_failure(
+                entry_state,
+                identifier=identifier,
+                link=link,
+                entry_pub_utc=entry["article_pub_utc"],
+                step=FAILURE_STEP_GENERATE_AUDIO,
+                message=failure_message,
+            )
+            items[identifier] = entry_state
+            print("  → ERROR: one_episode.py failed; continuing to next entry")
+            print(f"  → Failure stored for id={identifier} link={link}")
+            if failure_message:
+                print(f"  → Failure summary: {failure_message}")
+            if not kv_put(state_key, state):
+                print("[kv] Warning: failed to persist failure state to KV")
+            continue
 
         sidecar_path = None
         for line in out1.splitlines()[::-1]:
@@ -629,6 +768,7 @@ def main() -> None:
                 "article_image_url": meta.get("article_image_url", entry.get("article_image_url", "")),
             }
         )
+        _clear_entry_failure(entry_state)
         if generated_this_run:
             usage["cumulative_characters"] = usage.get("cumulative_characters", 0) + char_count
             run_characters += char_count

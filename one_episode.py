@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import datetime
+import gzip
 import html
 import io
 import json
@@ -11,9 +12,10 @@ import os
 import pathlib
 import re
 import sys
-from typing import Protocol, Sequence, TypedDict
+from typing import Callable, Protocol, Sequence, TypedDict
 
 import feedparser
+import requests
 from google.cloud import texttospeech
 from pydub import AudioSegment, effects
 
@@ -50,6 +52,7 @@ class SidecarPayload(TypedDict):
     tts_characters: int
     tts_generated: bool
 
+
 class _TTSClient(Protocol):
     """Protocol to help type-check Google Text-to-Speech client usage."""
 
@@ -70,6 +73,10 @@ PITCH = float(os.getenv("GCP_TTS_PITCH", "0.0"))
 RSS_URL = os.getenv("RSS_URL", "")
 TARGET_LINK = os.getenv("TARGET_ENTRY_LINK", "").strip()
 TARGET_ID = os.getenv("TARGET_ENTRY_ID", "").strip()
+RSS_DEBUG_FILENAME = "last_rss.xml"
+RSS_DEBUG_SNIPPET_CHARS = 400
+RSS_DEBUG_HTTP_CONNECT_TIMEOUT_S = 10.0
+RSS_DEBUG_HTTP_READ_TIMEOUT_S = 20.0
 
 
 def _ensure_str(value: object, *, default: str = "") -> str:
@@ -79,6 +86,146 @@ def _ensure_str(value: object, *, default: str = "") -> str:
     if value is None:
         return default
     return str(value)
+
+
+def _describe_rss_source(rss_url: str) -> str:
+    """Return a concise description of the RSS input (URL, file path, or inline XML).
+
+    Inputs: rss_url from RSS_URL; may be empty, a URL, a local path, or inline XML.
+    Outputs: a short human-readable description (never the full inline XML payload).
+    Edge cases: empty string, non-existent path, inline XML with leading whitespace.
+    """
+    if not rss_url:
+        return "RSS_URL is empty"
+    stripped = rss_url.lstrip()
+    if stripped.startswith("<"):
+        return f"inline XML string in RSS_URL (length={len(rss_url)})"
+    rss_path = pathlib.Path(rss_url)
+    if rss_path.exists():
+        try:
+            size_bytes = rss_path.stat().st_size
+        except OSError:
+            size_bytes = -1
+        size_label = f"{size_bytes} bytes" if size_bytes >= 0 else "unknown size"
+        return f"local file {rss_path.resolve()} ({size_label})"
+    return f"url {rss_url} (length={len(rss_url)})"
+
+
+def _looks_like_html(payload_text: str) -> bool:
+    """Detect obvious HTML payloads that are masquerading as RSS/Atom feeds.
+
+    Inputs: decoded text payload (best-effort).
+    Outputs: True when the content resembles HTML, False otherwise.
+    Edge cases: leading whitespace, mixed-case tags, short payloads.
+    """
+    stripped = payload_text.lstrip().lower()
+    if stripped.startswith("<!doctype html") or stripped.startswith("<html"):
+        return True
+    return "<html" in stripped[:600]
+
+
+def _decode_rss_payload_for_debug(payload: bytes) -> str:
+    """Decode RSS bytes for debug output, handling gzip and invalid UTF-8 safely.
+
+    Inputs: raw bytes captured from disk or HTTP.
+    Outputs: decoded text (replacement characters on decode errors).
+    Edge cases: gzip payloads, invalid encodings, empty payloads.
+    """
+    if payload.startswith(b"\x1f\x8b"):
+        try:
+            payload = gzip.decompress(payload)
+        except OSError:
+            pass
+    return payload.decode("utf-8", errors="replace")
+
+
+def _read_rss_payload_for_debug(
+    rss_url: str,
+    *,
+    http_get: Callable[..., requests.Response] = requests.get,
+) -> bytes | None:
+    """Fetch or read the RSS payload for debugging when parsing yields no entries.
+
+    Inputs: rss_url from RSS_URL and an injectable http_get function for HTTP fetches.
+    Outputs: raw bytes, or None if the payload cannot be accessed.
+    Edge cases: inline XML, missing files, network errors, non-HTTP strings.
+    """
+    if not rss_url:
+        return None
+    stripped = rss_url.lstrip()
+    if stripped.startswith("<"):
+        return rss_url.encode("utf-8", errors="replace")
+
+    rss_path = pathlib.Path(rss_url)
+    if rss_path.exists():
+        try:
+            return rss_path.read_bytes()
+        except OSError as exc:
+            print(f"RSS debug: failed to read RSS_URL file: {exc}")
+            return None
+
+    if rss_url.startswith(("http://", "https://")):
+        try:
+            response = http_get(
+                rss_url,
+                timeout=(RSS_DEBUG_HTTP_CONNECT_TIMEOUT_S, RSS_DEBUG_HTTP_READ_TIMEOUT_S),
+            )
+            response.raise_for_status()
+            return response.content
+        except Exception as exc:
+            print(f"RSS debug: failed to fetch RSS_URL over HTTP: {exc}")
+            return None
+
+    print("RSS debug: RSS_URL is not a file path or HTTP URL; skipping payload fetch")
+    return None
+
+
+def _log_feedparser_diagnostics(parsed: feedparser.FeedParserDict, *, entries_count: int) -> None:
+    """Log feedparser diagnostics to help explain why a feed produced zero entries.
+
+    Inputs: parsed feedparser result and entries_count from that parse.
+    Outputs: None (prints to stdout).
+    Edge cases: missing feedparser attributes or exceptions during formatting.
+    """
+    bozo_flag = bool(getattr(parsed, "bozo", False))
+    bozo_exception = getattr(parsed, "bozo_exception", None)
+    href = getattr(parsed, "href", None)
+    print(f"RSS parse entries: {entries_count}")
+    if href:
+        print(f"RSS parsed href: {href}")
+    if bozo_flag or bozo_exception:
+        print(f"RSS parse bozo={bozo_flag} exception={bozo_exception}")
+
+
+def _dump_rss_debug(rss_url: str) -> None:
+    """Persist the RSS payload and print a short snippet when parsing yields no entries.
+
+    Inputs: rss_url from RSS_URL.
+    Outputs: None (writes a debug file and prints summary/snippet).
+    Edge cases: payload unavailable, file write errors, non-UTF-8 payloads.
+    Atomicity: debug file write is best-effort and not atomic.
+    """
+    print(f"RSS debug source (RSS_URL): {_describe_rss_source(rss_url)}")
+    payload = _read_rss_payload_for_debug(rss_url)
+    if payload is None:
+        print("RSS debug: no payload available to dump")
+        return
+
+    debug_dir = OUT / "debug"
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    debug_path = debug_dir / RSS_DEBUG_FILENAME
+    try:
+        debug_path.write_bytes(payload)
+        print(f"RSS debug: wrote {len(payload)} bytes to {debug_path}")
+    except OSError as exc:
+        print(f"RSS debug: failed to write debug payload: {exc}")
+
+    payload_text = _decode_rss_payload_for_debug(payload)
+    snippet = payload_text[:RSS_DEBUG_SNIPPET_CHARS]
+    print(f"RSS debug snippet (first {RSS_DEBUG_SNIPPET_CHARS} chars):")
+    print(snippet)
+    if _looks_like_html(payload_text):
+        print("RSS debug: payload looks like HTML, not RSS")
 
 def slugify(url_or_title: str) -> str:
     """Turn a link or title into a short filesystem-friendly slug for the MP3 name."""
@@ -126,7 +273,9 @@ def select_entry() -> EntryMeta:
     parsed: feedparser.FeedParserDict = feedparser.parse(RSS_URL)
     entries: list[object] = list(parsed.entries)
     if not entries:
-        sys.exit("RSS has no entries")
+        _log_feedparser_diagnostics(parsed, entries_count=0)
+        _dump_rss_debug(RSS_URL)
+        sys.exit("RSS has no entries; see RSS debug output above")
 
     def matches_target(entry: object) -> bool:
         """Check whether the feed entry matches the CLI-supplied target filters."""
@@ -313,6 +462,7 @@ def main() -> None:
     if not RSS_URL:
         sys.exit("Missing RSS_URL")
 
+    print(f"RSS source (RSS_URL): {_describe_rss_source(RSS_URL)}")
     e = select_entry()
     # filename: <YYYYMMDD-HHMMSS>-<slug(title or path)>
     dt = datetime.datetime.fromisoformat(e["pub_utc"].replace("Z","+00:00")).astimezone(datetime.timezone.utc)
