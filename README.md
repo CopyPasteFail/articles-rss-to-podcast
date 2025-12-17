@@ -55,7 +55,7 @@ nvm use 20.19.4
 Direct Upload via Wrangler
 
 ```bash
-npm install -g wrangler@4.53.0
+npm install -g wrangler@4.59.2
 wrangler login
 wrangler pages project create tts-podcast-feeds
 wrangler pages deploy public --project-name tts-podcast-feeds
