@@ -55,10 +55,10 @@ nvm use 20.19.4
 Direct Upload via Wrangler
 
 ```bash
-npm install -g wrangler@4.59.2
-wrangler login
-wrangler pages project create tts-podcast-feeds
-wrangler pages deploy public --project-name tts-podcast-feeds
+npm install
+npx wrangler login
+npx wrangler pages project create tts-podcast-feeds
+npx wrangler pages deploy public --project-name tts-podcast-feeds
 ```
 
 ### 6) Run it
@@ -132,13 +132,13 @@ gcloud auth login --no-browser
 
 # Install Node.js tooling for Wrangler (system Node is fine for automation)
 sudo apt-get install -y nodejs npm
-npm install -g wrangler
+npm install
 
 # Install the Internet Archive CLI helper (lives in your Python venv or global site-packages)
 pip install --upgrade internetarchive
 ```
 
-> Prefer `nvm`? Install NVM first, then run `nvm install --lts` before `npm install -g wrangler`.
+> Prefer `nvm`? Install NVM first, then run `nvm install --lts` before `npm install`.
 
 ### B) Google Cloud Text-to-Speech project
 
@@ -304,15 +304,15 @@ Documentation:
 2. Authenticate Wrangler and create a Pages project (Direct Upload flow):
 
    ```bash
-   wrangler login
-   wrangler whoami              # prints your Account ID for reference
-   wrangler pages project create tts-podcast-feeds
+   npx wrangler login
+   npx wrangler whoami              # prints your Account ID for reference
+   npx wrangler pages project create tts-podcast-feeds
    ```
 
 3. Create a Workers KV namespace to store feed state:
 
    ```bash
-   wrangler kv:namespace create "tts-podcast-state"
+   npx wrangler kv:namespace create "tts-podcast-state"
    # copy the returned ID into CF_KV_NAMESPACE_ID inside .env
    ```
 
@@ -322,7 +322,7 @@ Documentation:
    - Permissions: Pages · Edit, Workers KV Storage · Edit
    - Scope: account-wide
 
-5. Copy your Cloudflare Account ID into `.env` (shown in the dashboard or via `wrangler whoami`).
+5. Copy your Cloudflare Account ID into `.env` (shown in the dashboard or via `npx wrangler whoami`).
 
 6. (Optional) Configure cache purge if you use a custom domain: note your Zone ID from the dashboard.
 
@@ -399,7 +399,7 @@ API reference: https://developers.cloudflare.com/api/resources/cache/methods/pur
 */15 * * * * cd /opt/rss-to-tts && \
   source .venv/bin/activate && \
   python run_feed.py geektime >> logs/geektime.log 2>&1 && \
-  wrangler pages deploy public --project-name tts-podcast-feeds
+  ./node_modules/.bin/wrangler pages deploy public --project-name tts-podcast-feeds
 ```
 
 **Windows Task Scheduler** via WSL:
@@ -537,7 +537,7 @@ These change over time. Always check the official pages.
 
 - TTS fails or returns permission errors: confirm billing is enabled on the GCP project and the service account has a TTS role. Verify `GOOGLE_APPLICATION_CREDENTIALS` path.
 - MP3 not uploaded: run `ia configure` again and test `ia upload test-item ./README.md`.
-- Pages deploy errors: run `wrangler login` and confirm `CF_PAGES_PROJECT`. Try `wrangler pages project list`.
+- Pages deploy errors: run `npx wrangler login` and confirm `CF_PAGES_PROJECT`. Try `npx wrangler pages project list`.
 - KV writes fail: reissue the API token with Workers KV Storage Edit. Confirm the namespace name matches `CF_KV_NAMESPACE_NAME`.
 - IA item blocked/offline: run `python scripts/reset_episode.py <slug> <article_link>` to drop the KV/local state, then rerun the feed. If IA keeps rejecting the old identifier, set `IA_ID_PREFIX=<new-prefix>` in `configs/<slug>.env` to upload under a fresh namespace.
 - Podcast apps do not show new episodes: purge the feed URL and remember that apps poll on their own schedules.

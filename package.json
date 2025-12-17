@@ -1,0 +1,8 @@
+{
+  "name": "articles-rss-to-podcast",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "wrangler": "4.60.0"
+  }
+}

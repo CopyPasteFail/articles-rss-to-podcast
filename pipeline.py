@@ -99,8 +99,11 @@ def _get_feedparser() -> FeedparserModule:
 
 # Root folders used throughout the flow (generation -> upload -> deploy).
 ROOT = pathlib.Path(__file__).resolve().parent
-OUT  = pathlib.Path(os.getenv("OUT_DIR", "./out")).resolve()
+OUT = pathlib.Path(os.getenv("OUT_DIR", "./out")).resolve()
 PUBLIC = (ROOT / "public").resolve()
+
+WRANGLER_BINARY_NAME = "wrangler"
+LOCAL_WRANGLER_PATH = (ROOT / "node_modules" / ".bin" / WRANGLER_BINARY_NAME).resolve()
 
 PY = sys.executable
 
@@ -156,6 +159,15 @@ def git_info() -> tuple[str | None, str | None]:
     except Exception:
         return None, None
 
+def resolve_wrangler_path() -> str | None:
+    """Return the Wrangler CLI path, preferring PATH and falling back to local node_modules."""
+    system_path = shutil.which(WRANGLER_BINARY_NAME)
+    if system_path:
+        return system_path
+    if LOCAL_WRANGLER_PATH.exists():
+        return str(LOCAL_WRANGLER_PATH)
+    return None
+
 # ---------- Cloudflare KV helpers ----------
 def _kv_base() -> str:
     """Base Cloudflare KV URL used by the state helpers below."""
@@ -206,7 +218,8 @@ def kv_get(key: str) -> JSONDict | None:
 
 def kv_put_via_wrangler(key: str, data: JSONDict) -> bool:
     """Fallback KV writer using wrangler CLI when direct API calls keep timing out."""
-    if not shutil.which("wrangler"):
+    wrangler_path = resolve_wrangler_path()
+    if not wrangler_path:
         return False
 
     tmp_path: str | None = None
@@ -218,7 +231,7 @@ def kv_put_via_wrangler(key: str, data: JSONDict) -> bool:
 
         ns_id = ensure_kv_namespace_id()
         cmd = [
-            "wrangler",
+            wrangler_path,
             "kv",
             "key",
             "put",
@@ -704,10 +717,11 @@ def deploy_pages() -> tuple[bool, bool]:
     """Kick Cloudflare Pages so listeners can see RSS/website updates right away."""
     # Optional automatic deploy to Cloudflare Pages with Wrangler
     if CF_API_TOKEN and CF_ACCOUNT_ID and CF_PAGES_PROJECT:
-        if shutil.which("wrangler"):
+        wrangler_path = resolve_wrangler_path()
+        if wrangler_path:
             try:
                 deploy_args = [
-                    "wrangler","pages","deploy","public",
+                    wrangler_path, "pages", "deploy", "public",
                     "--project-name",CF_PAGES_PROJECT,
                     "--commit-dirty=true",
                 ]
