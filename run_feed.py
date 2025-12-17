@@ -32,7 +32,10 @@ def main():
 
     py = sys.executable
     print(f"[run] feed={slug} env={feed_env}")
-    subprocess.check_call([py, str(ROOT / "pipeline.py")])
+    try:
+        subprocess.check_call([py, str(ROOT / "pipeline.py")])
+    except subprocess.CalledProcessError as exc:
+        sys.exit(f"Pipeline failed (exit {exc.returncode}).")
 
 if __name__ == "__main__":
     main()

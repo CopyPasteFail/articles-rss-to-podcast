@@ -97,6 +97,61 @@ def _get_feedparser() -> FeedparserModule:
         _feedparser_module = cast(FeedparserModule, module)
     return _feedparser_module
 
+
+def _fetch_rss_payload(
+    rss_url: str,
+    *,
+    http_get: Any = requests.get,
+) -> tuple[bytes | None, str | None]:
+    """Fetch RSS payload over HTTP(S) and classify common CDN/origin failures.
+
+    Inputs: rss_url from RSS_URL and an injectable http_get for testing.
+    Outputs: (payload bytes, error message) where payload is None on failure.
+    Edge cases: non-HTTP URLs, timeouts, Cloudflare status codes, or unknown 4xx/5xx.
+    """
+    if not rss_url.startswith(("http://", "https://")):
+        return None, None
+    headers = {
+        "User-Agent": RSS_HTTP_USER_AGENT,
+        "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
+    }
+    try:
+        response = http_get(
+            rss_url,
+            headers=headers,
+            timeout=(RSS_HTTP_CONNECT_TIMEOUT_S, RSS_HTTP_READ_TIMEOUT_S),
+        )
+    except requests.Timeout:
+        return (
+            None,
+            "RSS fetch timed out while waiting for the origin server response "
+            "(possible Cloudflare 524 or slow origin).",
+        )
+    except requests.RequestException as exc:
+        return None, f"RSS fetch failed before parsing: {exc}"
+
+    status_code = response.status_code
+    server_header = (response.headers.get("server") or "").lower()
+    is_cloudflare = "cloudflare" in server_header
+
+    if status_code in RSS_HTTP_CLOUDFLARE_STATUS_CODES and is_cloudflare:
+        return None, f"RSS fetch failed: Cloudflare {status_code} (origin error)."
+    if status_code in RSS_HTTP_BLOCK_STATUS_CODES and is_cloudflare:
+        return None, f"RSS fetch blocked at Cloudflare (HTTP {status_code})."
+    if status_code >= 400:
+        return None, f"RSS fetch failed: HTTP {status_code}."
+    return response.content, None
+
+
+def _payload_looks_like_html(payload: bytes) -> bool:
+    """Return True when the RSS payload appears to be HTML instead of XML."""
+    try:
+        text = payload.decode("utf-8", errors="replace")
+    except Exception:
+        return False
+    snippet = text.lstrip()[:200].lower()
+    return snippet.startswith("<!doctype html") or snippet.startswith("<html")
+
 # Root folders used throughout the flow (generation -> upload -> deploy).
 ROOT = pathlib.Path(__file__).resolve().parent
 OUT = pathlib.Path(os.getenv("OUT_DIR", "./out")).resolve()
@@ -117,6 +172,11 @@ _cf_kv_namespace_id = os.getenv("CF_KV_NAMESPACE_ID", "").strip()
 SLUG = os.getenv("PODCAST_SLUG", "default").strip()
 IA_ID_PREFIX = os.getenv("IA_ID_PREFIX", SLUG).strip() or SLUG
 RSS_URL = os.getenv("RSS_URL", "").strip()
+RSS_HTTP_USER_AGENT = "tts-podcast-rss-fetcher/1.0"
+RSS_HTTP_CONNECT_TIMEOUT_S = 10.0
+RSS_HTTP_READ_TIMEOUT_S = 20.0
+RSS_HTTP_CLOUDFLARE_STATUS_CODES = {520, 521, 522, 523, 524, 525, 526}
+RSS_HTTP_BLOCK_STATUS_CODES = {403, 429, 503}
 FAILURE_MESSAGE_MAX_CHARS = 500
 FAILURE_TRUNCATION_SUFFIX = "...[truncated]"
 FAILED_ENTRY_AT_UTC_KEY = "last_failure_at_utc"
@@ -450,7 +510,17 @@ def _entry_from_feed(e: Any) -> EntryDict:
 def fetch_entries_from_rss(limit: int | None = None) -> list[EntryDict]:
     """Pull entries from the configured RSS feed so we know what to process."""
     feedparser = _get_feedparser()
-    p = feedparser.parse(RSS_URL)
+    payload, rss_error = _fetch_rss_payload(RSS_URL)
+    if rss_error:
+        raise SystemExit(rss_error)
+    if payload is not None:
+        if _payload_looks_like_html(payload):
+            raise SystemExit(
+                "RSS fetch returned HTML instead of XML (possible CDN block or origin error)."
+            )
+        p = feedparser.parse(payload)
+    else:
+        p = feedparser.parse(RSS_URL)
     if not p.entries:
         raise SystemExit("RSS has no entries")
     entries = [_entry_from_feed(e) for e in p.entries]
