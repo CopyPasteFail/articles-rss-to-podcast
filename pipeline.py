@@ -115,6 +115,7 @@ def _fetch_rss_payload(
         "User-Agent": RSS_HTTP_USER_AGENT,
         "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
     }
+    source_feed_context = f"source RSS feed '{rss_url}'"
     try:
         response = http_get(
             rss_url,
@@ -124,22 +125,28 @@ def _fetch_rss_payload(
     except requests.Timeout:
         return (
             None,
-            "RSS fetch timed out while waiting for the origin server response "
-            "(possible Cloudflare 524 or slow origin).",
+            f"Failed to fetch {source_feed_context}: request timed out while waiting for the "
+            "origin server response (possible Cloudflare 524 or slow origin).",
         )
     except requests.RequestException as exc:
-        return None, f"RSS fetch failed before parsing: {exc}"
+        return None, f"Failed to fetch {source_feed_context} before parsing: {exc}"
 
     status_code = response.status_code
     server_header = (response.headers.get("server") or "").lower()
     is_cloudflare = "cloudflare" in server_header
 
     if status_code in RSS_HTTP_CLOUDFLARE_STATUS_CODES and is_cloudflare:
-        return None, f"RSS fetch failed: Cloudflare {status_code} (origin error)."
+        return (
+            None,
+            f"Failed to fetch {source_feed_context}: Cloudflare {status_code} (origin error).",
+        )
     if status_code in RSS_HTTP_BLOCK_STATUS_CODES and is_cloudflare:
-        return None, f"RSS fetch blocked at Cloudflare (HTTP {status_code})."
+        return (
+            None,
+            f"Failed to fetch {source_feed_context}: blocked at Cloudflare (HTTP {status_code}).",
+        )
     if status_code >= 400:
-        return None, f"RSS fetch failed: HTTP {status_code}."
+        return None, f"Failed to fetch {source_feed_context}: HTTP {status_code}."
     return response.content, None
 
 
