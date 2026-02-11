@@ -166,6 +166,7 @@ PUBLIC = (ROOT / "public").resolve()
 
 WRANGLER_BINARY_NAME = "wrangler"
 LOCAL_WRANGLER_PATH = (ROOT / "node_modules" / ".bin" / WRANGLER_BINARY_NAME).resolve()
+_has_warned_about_global_wrangler_fallback = False
 
 PY = sys.executable
 
@@ -331,12 +332,25 @@ def git_info() -> tuple[str | None, str | None]:
         return None, None
 
 def resolve_wrangler_path() -> str | None:
-    """Return the Wrangler CLI path, preferring PATH and falling back to local node_modules."""
-    system_path = shutil.which(WRANGLER_BINARY_NAME)
-    if system_path:
-        return system_path
+    """Resolve the Wrangler CLI path used by deploy/KV fallback commands.
+
+    Inputs: none (reads repository layout and PATH).
+    Outputs: absolute path to Wrangler, or None when unavailable.
+    Edge cases: if local repo dependencies are missing, fall back to global PATH and emit
+    a warning so operators know a non-pinned version may be used.
+    """
     if LOCAL_WRANGLER_PATH.exists():
         return str(LOCAL_WRANGLER_PATH)
+    system_path = shutil.which(WRANGLER_BINARY_NAME)
+    if system_path:
+        global _has_warned_about_global_wrangler_fallback
+        if not _has_warned_about_global_wrangler_fallback:
+            print(
+                "[warn] Local Wrangler not found at "
+                f"{LOCAL_WRANGLER_PATH}; falling back to global PATH binary: {system_path}"
+            )
+            _has_warned_about_global_wrangler_fallback = True
+        return system_path
     return None
 
 # ---------- Cloudflare KV helpers ----------

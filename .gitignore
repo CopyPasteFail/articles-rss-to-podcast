@@ -8,3 +8,4 @@ tts-key.json
 .wrangler/
 .cache/
 .mf/
+node_modules/
