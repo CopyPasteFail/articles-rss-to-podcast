@@ -126,7 +126,7 @@ def _fetch_rss_payload(
         return (
             None,
             f"Failed to fetch {source_feed_context}: request timed out while waiting for the "
-            "origin server response (possible Cloudflare 524 or slow origin).",
+            "origin server response.",
         )
     except requests.RequestException as exc:
         return None, f"Failed to fetch {source_feed_context} before parsing: {exc}"
