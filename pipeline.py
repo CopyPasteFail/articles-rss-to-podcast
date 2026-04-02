@@ -11,7 +11,6 @@ import os
 import pathlib
 import re
 import random
-import random
 import shutil
 import subprocess
 import sys
@@ -159,6 +158,7 @@ def _payload_looks_like_html(payload: bytes) -> bool:
     snippet = text.lstrip()[:200].lower()
     return snippet.startswith("<!doctype html") or snippet.startswith("<html")
 
+
 # Root folders used throughout the flow (generation -> upload -> deploy).
 ROOT = pathlib.Path(__file__).resolve().parent
 OUT = pathlib.Path(os.getenv("OUT_DIR", "./out")).resolve()
@@ -172,7 +172,7 @@ PY = sys.executable
 
 # Cloudflare vars
 CF_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip()
-CF_API_TOKEN  = os.getenv("CLOUDFLARE_API_TOKEN", "").strip()
+CF_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN", "").strip()
 CF_PAGES_PROJECT = os.getenv("CF_PAGES_PROJECT", "tts-podcast-feeds").strip()
 CF_KV_NAMESPACE_NAME = os.getenv("CF_KV_NAMESPACE_NAME", "tts-podcast-state").strip()
 _cf_kv_namespace_id = os.getenv("CF_KV_NAMESPACE_ID", "").strip()
@@ -206,7 +206,9 @@ RETRY_FAILED_ENV_NAME = "PODCAST_RETRY_FAILED"
 RETRY_FAILED_VALUES = {"1", "true", "yes", "y"}
 
 
-def sh(*args: object, env: Mapping[str, str] | None = None, cwd: StrPath | None = None) -> str:
+def sh(
+    *args: object, env: Mapping[str, str] | None = None, cwd: StrPath | None = None
+) -> str:
     """Run a subprocess, streaming output live while still capturing it for parsing."""
     print("→", " ".join(map(str, args)))
     env_map = os.environ.copy()
@@ -331,6 +333,7 @@ def git_info() -> tuple[str | None, str | None]:
     except Exception:
         return None, None
 
+
 def resolve_wrangler_path() -> str | None:
     """Resolve the Wrangler CLI path used by deploy/KV fallback commands.
 
@@ -353,12 +356,14 @@ def resolve_wrangler_path() -> str | None:
         return system_path
     return None
 
+
 # ---------- Cloudflare KV helpers ----------
 def _kv_base() -> str:
     """Base Cloudflare KV URL used by the state helpers below."""
     if not (CF_ACCOUNT_ID and CF_API_TOKEN):
         raise SystemExit("Missing CLOUDFLARE_API_TOKEN or CF_ACCOUNT_ID")
     return f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/storage/kv/namespaces"
+
 
 def ensure_kv_namespace_id() -> str:
     """Ensure we know the KV namespace id so we can store per-feed progress."""
@@ -372,15 +377,22 @@ def ensure_kv_namespace_id() -> str:
         for ns in r.json().get("result", []):
             if ns.get("title") == CF_KV_NAMESPACE_NAME:
                 _cf_kv_namespace_id = ns["id"]
-                print(f"[cf] Using existing KV '{CF_KV_NAMESPACE_NAME}' id={_cf_kv_namespace_id}")
+                print(
+                    f"[cf] Using existing KV '{CF_KV_NAMESPACE_NAME}' id={_cf_kv_namespace_id}"
+                )
                 return _cf_kv_namespace_id
     # create
-    r = requests.post(_kv_base(), headers=headers, json={"title": CF_KV_NAMESPACE_NAME}, timeout=15)
+    r = requests.post(
+        _kv_base(), headers=headers, json={"title": CF_KV_NAMESPACE_NAME}, timeout=15
+    )
     if not r.ok:
-        raise SystemExit(f"Failed to create KV namespace: {r.status_code} {r.text[:200]}")
+        raise SystemExit(
+            f"Failed to create KV namespace: {r.status_code} {r.text[:200]}"
+        )
     _cf_kv_namespace_id = r.json()["result"]["id"]
     print(f"[cf] Created KV '{CF_KV_NAMESPACE_NAME}' id={_cf_kv_namespace_id}")
     return _cf_kv_namespace_id
+
 
 def kv_url(key: str) -> str:
     """Build the REST endpoint for a specific KV key."""
@@ -390,7 +402,9 @@ def kv_url(key: str) -> str:
 def kv_get(key: str) -> JSONDict | None:
     """Read JSON pipeline state for the feed from Cloudflare KV."""
     try:
-        r = requests.get(kv_url(key), headers={"Authorization": f"Bearer {CF_API_TOKEN}"}, timeout=15)
+        r = requests.get(
+            kv_url(key), headers={"Authorization": f"Bearer {CF_API_TOKEN}"}, timeout=15
+        )
         if r.status_code == 200:
             return json.loads(r.text) if r.text else {}
         if r.status_code == 404:
@@ -401,6 +415,7 @@ def kv_get(key: str) -> JSONDict | None:
         print(f"[kv] GET error: {e}")
         return None
 
+
 def kv_put_via_wrangler(key: str, data: JSONDict) -> bool:
     """Fallback KV writer using wrangler CLI when direct API calls keep timing out."""
     wrangler_path = resolve_wrangler_path()
@@ -409,7 +424,9 @@ def kv_put_via_wrangler(key: str, data: JSONDict) -> bool:
 
     tmp_path: str | None = None
     try:
-        tmp = tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8")
+        tmp = tempfile.NamedTemporaryFile(
+            "w", delete=False, suffix=".json", encoding="utf-8"
+        )
         with tmp:
             json.dump(data, tmp, ensure_ascii=False)
             tmp_path = tmp.name
@@ -455,7 +472,10 @@ def kv_put(key: str, data: JSONDict) -> bool:
             timeout = base_timeout * (2 ** (attempt - 1))
             r = requests.put(
                 kv_url(key),
-                headers={"Authorization": f"Bearer {CF_API_TOKEN}", "Content-Type": "application/json"},
+                headers={
+                    "Authorization": f"Bearer {CF_API_TOKEN}",
+                    "Content-Type": "application/json",
+                },
                 data=json.dumps(data, ensure_ascii=False),
                 timeout=timeout,
             )
@@ -483,14 +503,17 @@ def kv_put_or_die(key: str, data: JSONDict) -> None:
         return
     raise SystemExit("KV update failed; aborting to avoid duplicates")
 
+
 # ---------- IA helpers ----------
 def link_hash(link: str) -> str:
     """Return a stable short hash used anywhere we need deterministic filenames."""
     return hashlib.sha1(link.encode("utf-8")).hexdigest()
 
+
 def ia_identifier_for_link(link: str) -> str:
     """Namespace the link hash so uploads land under unique IA identifiers."""
     return f"tts-{IA_ID_PREFIX}-{link_hash(link)[:16]}"
+
 
 def ia_has_episode_http(identifier: str) -> bool:
     """Quickly check whether IA already hosts audio for this entry."""
@@ -501,18 +524,25 @@ def ia_has_episode_http(identifier: str) -> bool:
     except Exception:
         return False
 
+
 # ---------- RSS fetch helpers ----------
 def _entry_from_feed(e: Any) -> EntryDict:
     """Map feedparser entries to the schema expected by the rest of the pipeline."""
     link = getattr(e, "link", None) or getattr(e, "id", None)
     title = getattr(e, "title", link)
-    plain_text, html_content, subtitle, lead_image = resolve_article_content(e, link, allow_fetch=False)
-    summary = plain_text or getattr(e, "summary", "") or getattr(e, "description", "") or ""
+    plain_text, html_content, subtitle, lead_image = resolve_article_content(
+        e, link, allow_fetch=False
+    )
+    summary = (
+        plain_text or getattr(e, "summary", "") or getattr(e, "description", "") or ""
+    )
     if not html_content and summary:
         html_content = text_to_html(summary)
     tstruct = getattr(e, "published_parsed", None) or getattr(e, "updated_parsed", None)
     if tstruct:
-        pub_utc = datetime.datetime(*tstruct[:6], tzinfo=datetime.timezone.utc).isoformat()
+        pub_utc = datetime.datetime(
+            *tstruct[:6], tzinfo=datetime.timezone.utc
+        ).isoformat()
     else:
         pub_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
     author = getattr(e, "author", "") or getattr(e, "creator", "") or ""
@@ -573,10 +603,12 @@ def update_latest_state_snapshot(state: JSONDict) -> None:
         state["rss_added"] = latest.get("rss_added")
         state["uploaded_url"] = latest.get("uploaded_url")
 
+
 def newest_sidecar() -> str | None:
     """Return the latest sidecar on disk as a fallback when parsing TTS output."""
     sc = sorted(OUT.glob("*.mp3.rssmeta.json"), key=os.path.getmtime, reverse=True)
     return str(sc[0]) if sc else None
+
 
 def main() -> None:
     """Coordinate fetching entries, synthesizing audio, uploading, and feed updates."""
@@ -606,7 +638,12 @@ def main() -> None:
         raise SystemExit("RSS has no entries")
 
     total_entries = len(entries)
-    force_full_rescan = os.getenv("PODCAST_FULL_RESCAN", "").strip().lower() in {"1", "true", "yes", "y"}
+    force_full_rescan = os.getenv("PODCAST_FULL_RESCAN", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+    }
     last_processed_pub = state.get("last_pub_utc") or ""
 
     if force_full_rescan:
@@ -640,7 +677,9 @@ def main() -> None:
 
         if candidates:
             entries = candidates
-            print(f"[info] Processing {len(entries)} new/changed RSS entries (out of {total_entries})")
+            print(
+                f"[info] Processing {len(entries)} new/changed RSS entries (out of {total_entries})"
+            )
         else:
             entries = cast(list[EntryDict], [])
             print("[info] No new RSS entries detected; skipping re-scan")
@@ -712,7 +751,9 @@ def main() -> None:
         print(f"  IA has audio: {ia_present}")
         print(f"  feed already updated: {already_in_feed}")
 
-        if _should_skip_failed_entry(entry_state, entry["article_pub_utc"], retry_failed_entries):
+        if _should_skip_failed_entry(
+            entry_state, entry["article_pub_utc"], retry_failed_entries
+        ):
             last_failed_at = entry_state.get(FAILED_ENTRY_AT_UTC_KEY, "")
             last_failed_step = entry_state.get(FAILED_ENTRY_STEP_KEY, "")
             print(
@@ -731,13 +772,15 @@ def main() -> None:
         # Case: audio exists but feed is missing the episode
         if ia_present and last_pub == entry["article_pub_utc"] and not already_in_feed:
             print("  → Restoring feed entry from existing audio")
-            sidecar_path = (OUT / f"sidecar-{link_hash(link)}.json")
+            sidecar_path = OUT / f"sidecar-{link_hash(link)}.json"
             OUT.mkdir(parents=True, exist_ok=True)
             payload = entry | {
                 "mp3_local_path": "",
                 "mp3_filename": "episode.mp3",
                 "generated_il_iso": "",
-                "tts_characters": entry_state.get("tts_characters", estimate_characters(entry)),
+                "tts_characters": entry_state.get(
+                    "tts_characters", estimate_characters(entry)
+                ),
                 "tts_generated": False,
             }
             with sidecar_path.open("w", encoding="utf-8") as f:
@@ -822,10 +865,18 @@ def main() -> None:
         if char_count is None:
             char_count = estimate_characters(entry)
         entry_state["tts_characters"] = char_count
-        entry_state["article_subtitle"] = meta.get("article_subtitle", entry.get("article_subtitle", ""))
-        entry_state["article_summary"] = meta.get("article_summary", entry.get("article_summary", ""))
-        entry_state["article_summary_html"] = meta.get("article_summary_html", entry.get("article_summary_html", ""))
-        entry_state["article_image_url"] = meta.get("article_image_url", entry.get("article_image_url", ""))
+        entry_state["article_subtitle"] = meta.get(
+            "article_subtitle", entry.get("article_subtitle", "")
+        )
+        entry_state["article_summary"] = meta.get(
+            "article_summary", entry.get("article_summary", "")
+        )
+        entry_state["article_summary_html"] = meta.get(
+            "article_summary_html", entry.get("article_summary_html", "")
+        )
+        entry_state["article_image_url"] = meta.get(
+            "article_image_url", entry.get("article_image_url", "")
+        )
 
         print("  → Uploading to Internet Archive")
         out2 = sh(PY, str(ROOT / "upload_to_ia.py"), meta["mp3_local_path"])
@@ -853,15 +904,25 @@ def main() -> None:
                 "rss_added": True,
                 "last_pub_utc": entry["article_pub_utc"],
                 "article_pub_utc": entry["article_pub_utc"],
-                "article_subtitle": meta.get("article_subtitle", entry.get("article_subtitle", "")),
-                "article_summary": meta.get("article_summary", entry.get("article_summary", "")),
-                "article_summary_html": meta.get("article_summary_html", entry.get("article_summary_html", "")),
-                "article_image_url": meta.get("article_image_url", entry.get("article_image_url", "")),
+                "article_subtitle": meta.get(
+                    "article_subtitle", entry.get("article_subtitle", "")
+                ),
+                "article_summary": meta.get(
+                    "article_summary", entry.get("article_summary", "")
+                ),
+                "article_summary_html": meta.get(
+                    "article_summary_html", entry.get("article_summary_html", "")
+                ),
+                "article_image_url": meta.get(
+                    "article_image_url", entry.get("article_image_url", "")
+                ),
             }
         )
         _clear_entry_failure(entry_state)
         if generated_this_run:
-            usage["cumulative_characters"] = usage.get("cumulative_characters", 0) + char_count
+            usage["cumulative_characters"] = (
+                usage.get("cumulative_characters", 0) + char_count
+            )
             run_characters += char_count
         state["pending_deploy"] = True
         update_latest_state_snapshot(state)
@@ -913,12 +974,14 @@ def main() -> None:
 
             print(
                 "    Standard voices: used {:,} characters, {:,} free-tier remaining".format(
-                    standard["characters"], standard["free_tier_remaining"],
+                    standard["characters"],
+                    standard["free_tier_remaining"],
                 )
             )
             print(
                 "    WaveNet/Neural2 voices: used {:,} characters, {:,} free-tier remaining".format(
-                    premium["characters"], premium["free_tier_remaining"],
+                    premium["characters"],
+                    premium["free_tier_remaining"],
                 )
             )
         except Exception as e:
@@ -944,6 +1007,7 @@ def main() -> None:
     else:
         print("Feed unchanged; skipping deploy")
 
+
 def deploy_pages() -> tuple[bool, bool]:
     """Kick Cloudflare Pages so listeners can see RSS/website updates right away."""
     # Optional automatic deploy to Cloudflare Pages with Wrangler
@@ -952,11 +1016,17 @@ def deploy_pages() -> tuple[bool, bool]:
         if wrangler_path:
             try:
                 deploy_args = [
-                    wrangler_path, "pages", "deploy", "public",
-                    "--project-name",CF_PAGES_PROJECT,
+                    wrangler_path,
+                    "pages",
+                    "deploy",
+                    "public",
+                    "--project-name",
+                    CF_PAGES_PROJECT,
                     "--commit-dirty=true",
                 ]
-                env_branch = os.getenv("CF_PAGES_BRANCH") or os.getenv("CF_PAGES_PROD_BRANCH")
+                env_branch = os.getenv("CF_PAGES_BRANCH") or os.getenv(
+                    "CF_PAGES_PROD_BRANCH"
+                )
                 env_commit = os.getenv("CF_PAGES_COMMIT")
                 git_branch, git_commit = git_info()
                 branch = env_branch or git_branch

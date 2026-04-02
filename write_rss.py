@@ -82,7 +82,9 @@ class FeedGeneratorProtocol(Protocol):
     @property
     def podcast(self) -> PodcastExtension: ...
 
-    def load_extension(self, name: str, atom: bool = True, rss: bool = True) -> None: ...
+    def load_extension(
+        self, name: str, atom: bool = True, rss: bool = True
+    ) -> None: ...
 
     def title(self, title: str) -> None: ...
 
@@ -97,7 +99,9 @@ class FeedGeneratorProtocol(Protocol):
     def add_entry(self) -> FeedEntryProtocol: ...
 
 
-FeedItem = tuple[str | None, str | None, str | None, str | None, str | None, str | None, str]
+FeedItem = tuple[
+    str | None, str | None, str | None, str | None, str | None, str | None, str
+]
 
 ITUNES_NS = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
 
@@ -166,7 +170,9 @@ def _valid_itunes_image(url: str | None) -> bool:
     return parsed.path.lower().endswith((".jpg", ".png"))
 
 
-def add_item(feed_path: str, channel_meta: ChannelMeta, ep: EpisodePayload, keep_last: int = 200) -> None:
+def add_item(
+    feed_path: str, channel_meta: ChannelMeta, ep: EpisodePayload, keep_last: int = 200
+) -> None:
     """Append the episode described by ``ep`` and trim the feed to ``keep_last`` items."""
     items: list[FeedItem] = []
     if os.path.exists(feed_path):
@@ -199,21 +205,23 @@ def add_item(feed_path: str, channel_meta: ChannelMeta, ep: EpisodePayload, keep
     fg.podcast.itunes_author(channel_meta["author"])
     fg.podcast.itunes_explicit("no")
     if channel_meta.get("email"):
-        fg.podcast.itunes_owner(name=channel_meta["author"], email=channel_meta["email"])
+        fg.podcast.itunes_owner(
+            name=channel_meta["author"], email=channel_meta["email"]
+        )
     if channel_meta.get("image"):
         fg.podcast.itunes_image(channel_meta["image"])
     fg.podcast.itunes_category("News")
 
     channel_has_image = bool(channel_meta.get("image"))
 
-    for t, d, l, p, ln, g, img in items[:keep_last]:
+    for t, d, audio_url, p, audio_length, g, img in items[:keep_last]:
         fe = fg.add_entry()
         fe.title(t or "")
         fe.description(d or "")
         if p:
             fe.pubDate(p)
-        if l:
-            fe.enclosure(l, str(ln or 0), "audio/mpeg")
+        if audio_url:
+            fe.enclosure(audio_url, str(audio_length or 0), "audio/mpeg")
         if g:
             fe.guid(g, permalink=False)
         if not channel_has_image and _valid_itunes_image(img):
@@ -226,9 +234,13 @@ def add_item(feed_path: str, channel_meta: ChannelMeta, ep: EpisodePayload, keep
     article_link = ep.get("article_link")
     if full_desc_html:
         if subtitle:
-            full_desc_html = f"<p><strong>{html.escape(subtitle)}</strong></p>" + full_desc_html
+            full_desc_html = (
+                f"<p><strong>{html.escape(subtitle)}</strong></p>" + full_desc_html
+            )
         if article_link:
-            full_desc_html += f'<p>Original: <a href="{article_link}">{article_link}</a></p>'
+            full_desc_html += (
+                f'<p>Original: <a href="{article_link}">{article_link}</a></p>'
+            )
         fe.description(full_desc_html.strip())
     else:
         full_desc = ep.get("article_summary") or ""
@@ -247,7 +259,9 @@ def add_item(feed_path: str, channel_meta: ChannelMeta, ep: EpisodePayload, keep
     size = get_len(ep["audio_url"]) or 0
     fe.enclosure(ep["audio_url"], str(size), "audio/mpeg")
     fe.guid(
-        hashlib.sha1((ep["audio_url"] + ep.get("article_link", "")).encode("utf-8")).hexdigest(),
+        hashlib.sha1(
+            (ep["audio_url"] + ep.get("article_link", "")).encode("utf-8")
+        ).hexdigest(),
         permalink=False,
     )
     if not channel_has_image:

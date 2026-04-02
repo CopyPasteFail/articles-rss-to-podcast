@@ -1,10 +1,15 @@
 #!/usr/bin/env python
 """Load feed-specific env vars then run the full RSS-to-podcast pipeline."""
 
-import os, sys, pathlib, subprocess
+import os
+import pathlib
+import subprocess
+import sys
+
 from dotenv import load_dotenv
 
 ROOT = pathlib.Path(__file__).resolve().parent
+
 
 def main():
     """Entry point for operators: pick a slug, load .env files, run pipeline.py."""
@@ -36,6 +41,7 @@ def main():
         subprocess.check_call([py, str(ROOT / "pipeline.py")])
     except subprocess.CalledProcessError as exc:
         sys.exit(f"Pipeline failed (exit {exc.returncode}).")
+
 
 if __name__ == "__main__":
     main()

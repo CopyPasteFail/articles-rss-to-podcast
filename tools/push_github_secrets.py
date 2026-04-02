@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import pathlib
 import sys
 
 from tools.check_gh_auth import check_github_cli_authentication
