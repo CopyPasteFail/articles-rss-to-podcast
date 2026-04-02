@@ -364,13 +364,13 @@ def _validate_google_credentials_access() -> None:
     try:
         import google.auth
         from google.auth.transport.requests import Request
-    except Exception as exc:  # pragma: no cover - import failure is exercised via runtime
+    except (
+        Exception
+    ) as exc:  # pragma: no cover - import failure is exercised via runtime
         raise RuntimeError(f"Google auth libraries are unavailable: {exc}") from exc
 
     try:
-        credentials, _ = google.auth.default(
-            scopes=[GOOGLE_AUTH_SCOPE_CLOUD_PLATFORM]
-        )
+        credentials, _ = google.auth.default(scopes=[GOOGLE_AUTH_SCOPE_CLOUD_PLATFORM])
         credentials.refresh(Request())
     except Exception as exc:
         raise RuntimeError(str(exc)) from exc
@@ -406,9 +406,7 @@ def _ensure_audio_generation_environment_ready() -> None:
     try:
         _validate_google_credentials_access()
     except RuntimeError as exc:
-        raise SystemExit(
-            f"{GOOGLE_CREDENTIAL_SANITY_ERROR_PREFIX}: {exc}"
-        ) from exc
+        raise SystemExit(f"{GOOGLE_CREDENTIAL_SANITY_ERROR_PREFIX}: {exc}") from exc
 
 
 def _should_skip_failed_entry(
