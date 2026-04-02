@@ -1,0 +1,14 @@
+pipeline_id: geektime-he
+feed_slug: geektime
+feed_env_file: configs/geektime.env
+
+schedule:
+  timezone: Asia/Jerusalem
+  interval_hours: 2
+  window_start: "07:00"
+  window_end: "24:00"
+
+github:
+  workflow_file: .github/workflows/geektime-he.yml
+  branch_ref: refs/heads/main
+  environment: geektime-he

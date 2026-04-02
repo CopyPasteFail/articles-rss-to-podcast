@@ -1,0 +1,5 @@
+google:
+  project_id: my-gcp-project
+  project_number: "123456789012"
+  workload_identity_pool_id: github-actions
+  workload_identity_provider_id: github-provider

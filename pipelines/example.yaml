@@ -1,0 +1,26 @@
+pipeline_id: example-pipeline
+feed_slug: example
+feed_env_file: configs/example.env
+
+schedule:
+  timezone: Asia/Jerusalem
+  interval_hours: 2
+  window_start: "07:00"
+  window_end: "24:00"
+
+github:
+  workflow_file: .github/workflows/example-pipeline.yml
+  branch_ref: refs/heads/main
+  environment: example-pipeline
+
+failure_email:
+  transport: smtp
+  recipients:
+    - ops@example.com
+  subject_prefix: "[articles-rss-to-podcast]"
+  secret_names:
+    smtp_host: EXAMPLE_SMTP_HOST
+    smtp_port: EXAMPLE_SMTP_PORT
+    smtp_username: EXAMPLE_SMTP_USERNAME
+    smtp_password: EXAMPLE_SMTP_PASSWORD
+    smtp_from: EXAMPLE_SMTP_FROM

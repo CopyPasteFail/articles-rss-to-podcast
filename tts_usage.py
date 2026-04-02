@@ -10,15 +10,13 @@ import os
 from google.cloud import bigquery
 from google.cloud.bigquery.table import Row as BigQueryRow
 
-# Fully qualified table name (keep as-is or read from env)
-FQTN = os.environ.get(
-    "BILLING_EXPORT_TABLE",
-    "rss-hebrew-podcast-omer.billing_export.gcp_billing_export_v1_010406_CE1277_E64516",
-)
 
-# Free-tier defaults (override with env if Google changes them)
+DEFAULT_BILLING_EXPORT_TABLE = (
+    "example-project.example_billing.gcp_billing_export_v1_FAKE123_FAKE456"
+)
+BILLING_EXPORT_TABLE = os.environ.get("BILLING_EXPORT_TABLE", DEFAULT_BILLING_EXPORT_TABLE)
 FREE_TIER_STANDARD = int(os.environ.get("FREE_TIER_STANDARD", "4000000"))
-FREE_TIER_PREMIUM = int(os.environ.get("FREE_TIER_PREMIUM", "1000000"))  # WaveNet/Neural2
+FREE_TIER_PREMIUM = int(os.environ.get("FREE_TIER_PREMIUM", "1000000"))
 
 SQL = f"""
 DECLARE cur_invoice STRING DEFAULT FORMAT_DATE('%Y%m', CURRENT_DATE());
@@ -30,7 +28,7 @@ WITH base AS (
     DATE(usage_start_time) AS day,
     LOWER(sku.description) AS sku_desc,
     CAST(usage.amount AS NUMERIC) AS chars
-  FROM `{FQTN}`
+  FROM `{BILLING_EXPORT_TABLE}`
   WHERE invoice.month = cur_invoice
     AND LOWER(service.description) LIKE '%text-to-speech%'
     AND LOWER(sku.description) LIKE '%count of characters%'

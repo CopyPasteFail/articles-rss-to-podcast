@@ -947,7 +947,7 @@ def main() -> None:
 def deploy_pages() -> tuple[bool, bool]:
     """Kick Cloudflare Pages so listeners can see RSS/website updates right away."""
     # Optional automatic deploy to Cloudflare Pages with Wrangler
-    if CF_API_TOKEN and CF_ACCOUNT_ID and CF_PAGES_PROJECT:
+    if CF_API_TOKEN and CF_PAGES_PROJECT:
         wrangler_path = resolve_wrangler_path()
         if wrangler_path:
             try:
