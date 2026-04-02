@@ -104,6 +104,9 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
+      - name: Install Audio Dependencies
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
       - name: Install Node dependencies
         run: npm ci
 

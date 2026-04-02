@@ -172,3 +172,12 @@ def test_generate_workflow_yaml_exports_retry_attempt_limit() -> None:
         "PODCAST_MAX_RETRY_ATTEMPTS: ${{ vars.PODCAST_MAX_RETRY_ATTEMPTS }}"
         in workflow_yaml
     )
+
+
+def test_generate_workflow_yaml_installs_ffmpeg() -> None:
+    """Generated workflows should install ffmpeg before audio generation starts."""
+
+    workflow_yaml = generate_workflow_yaml(build_pipeline_config())
+
+    assert "Install Audio Dependencies" in workflow_yaml
+    assert "sudo apt-get update && sudo apt-get install -y ffmpeg" in workflow_yaml

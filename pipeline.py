@@ -212,6 +212,9 @@ RETRY_FAILED_ENV_NAME = "PODCAST_RETRY_FAILED"
 RETRY_FAILED_VALUES = {"1", "true", "yes", "y"}
 MAX_RETRY_ATTEMPTS_ENV_NAME = "PODCAST_MAX_RETRY_ATTEMPTS"
 DEFAULT_MAX_RETRY_ATTEMPTS = 3
+GOOGLE_AUTH_SCOPE_CLOUD_PLATFORM = "https://www.googleapis.com/auth/cloud-platform"
+GOOGLE_CREDENTIAL_SANITY_ERROR_PREFIX = "Google credential sanity check failed"
+REQUIRED_AUDIO_BINARY_NAMES = ("ffmpeg", "ffprobe")
 
 
 def _prepare_subprocess_command(args: tuple[object, ...]) -> list[str]:
@@ -331,6 +334,81 @@ def _get_max_retry_attempts() -> int:
         )
         return DEFAULT_MAX_RETRY_ATTEMPTS
     return parsed_value
+
+
+def _require_command_on_path(command_name: str) -> None:
+    """Fail fast when a required local executable is unavailable on PATH.
+
+    Inputs: command_name for a required system binary.
+    Outputs: None. Raises SystemExit when the binary cannot be resolved.
+    Edge cases: accepts absolute executable paths returned by PATH lookup.
+    """
+
+    resolved_command_path = shutil.which(command_name)
+    if resolved_command_path:
+        return
+    raise SystemExit(
+        "Audio generation sanity check failed: missing required system binary "
+        f"'{command_name}' on PATH."
+    )
+
+
+def _validate_google_credentials_access() -> None:
+    """Refresh Google credentials once so auth/setup issues fail before item retries.
+
+    Inputs: none. Reads GOOGLE_APPLICATION_CREDENTIALS from the current environment.
+    Outputs: None. Raises RuntimeError when the credentials cannot be refreshed.
+    Edge cases: keeps the import local so non-TTS commands stay lightweight.
+    """
+
+    try:
+        import google.auth
+        from google.auth.transport.requests import Request
+    except Exception as exc:  # pragma: no cover - import failure is exercised via runtime
+        raise RuntimeError(f"Google auth libraries are unavailable: {exc}") from exc
+
+    try:
+        credentials, _ = google.auth.default(
+            scopes=[GOOGLE_AUTH_SCOPE_CLOUD_PLATFORM]
+        )
+        credentials.refresh(Request())
+    except Exception as exc:
+        raise RuntimeError(str(exc)) from exc
+
+
+def _ensure_audio_generation_environment_ready() -> None:
+    """Verify auth and local tooling once before any entry-level audio generation starts.
+
+    Inputs: none. Reads GOOGLE_APPLICATION_CREDENTIALS and PATH from the environment.
+    Outputs: None. Raises SystemExit for non-retryable readiness failures.
+    Edge cases: clears IA_CONFIG_FILE because the upload step should not leak into TTS auth.
+    """
+
+    google_credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+    if not google_credentials_path:
+        raise SystemExit(
+            "Audio generation sanity check failed: GOOGLE_APPLICATION_CREDENTIALS is not set."
+        )
+
+    resolved_credentials_path = pathlib.Path(google_credentials_path)
+    if not resolved_credentials_path.exists():
+        raise SystemExit(
+            "Audio generation sanity check failed: missing Google credentials file "
+            f"{resolved_credentials_path}."
+        )
+
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(resolved_credentials_path)
+    os.environ.pop("IA_CONFIG_FILE", None)
+
+    for command_name in REQUIRED_AUDIO_BINARY_NAMES:
+        _require_command_on_path(command_name)
+
+    try:
+        _validate_google_credentials_access()
+    except RuntimeError as exc:
+        raise SystemExit(
+            f"{GOOGLE_CREDENTIAL_SANITY_ERROR_PREFIX}: {exc}"
+        ) from exc
 
 
 def _should_skip_failed_entry(
@@ -789,7 +867,7 @@ def main() -> None:
         str(PUBLIC / (os.getenv("PODCAST_FILE", f"feeds/{SLUG}.xml"))),
     )
 
-    gcp_ready = False
+    generation_environment_ready = False
     feed_updated = False
     processed = False
     run_characters = 0
@@ -925,13 +1003,9 @@ def main() -> None:
 
         # Otherwise we need to synthesize + upload
         attempted_entries += 1
-        if not gcp_ready:
-            sa = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
-            if not pathlib.Path(sa).exists():
-                raise SystemExit(f"Missing GCP SA key: {sa}")
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = sa
-            os.environ.pop("IA_CONFIG_FILE", None)
-            gcp_ready = True
+        if not generation_environment_ready:
+            _ensure_audio_generation_environment_ready()
+            generation_environment_ready = True
 
         print("  → Generating audio")
         env = os.environ.copy()
@@ -944,6 +1018,18 @@ def main() -> None:
                 output_text = str(output_text)
             failure_message = output_text.strip() or str(exc)
             failure_message = _truncate_text(failure_message, FAILURE_MESSAGE_MAX_CHARS)
+            if (
+                "No such file or directory: 'ffprobe'" in failure_message
+                or "No such file or directory: 'ffmpeg'" in failure_message
+                or "Unable to acquire impersonated credentials" in failure_message
+                or "DefaultCredentialsError" in failure_message
+                or "GOOGLE_APPLICATION_CREDENTIALS" in failure_message
+                or "IAM Service Account Credentials API" in failure_message
+            ):
+                raise SystemExit(
+                    "Audio generation sanity check failed while running one_episode.py: "
+                    f"{failure_message}"
+                ) from exc
             _record_entry_failure(
                 entry_state,
                 identifier=identifier,

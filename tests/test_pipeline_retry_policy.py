@@ -7,6 +7,7 @@ import subprocess
 import sys
 import types
 
+import pytest
 
 content_utils_stub = types.ModuleType("content_utils")
 content_utils_stub.resolve_article_content = lambda *args, **kwargs: ("", "", "", "")
@@ -107,6 +108,16 @@ def test_main_fails_when_entry_reaches_retry_limit(
             }
         ],
     )
+    monkeypatch.setattr(
+        pipeline,
+        "_validate_google_credentials_access",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        pipeline.shutil,
+        "which",
+        lambda command_name: f"/usr/bin/{command_name}",
+    )
 
     def fake_sh(*args: object, env=None, cwd=None) -> str:
         raise subprocess.CalledProcessError(1, [str(arg) for arg in args], "tts failed")
@@ -186,3 +197,125 @@ def test_main_skips_retry_exhausted_entry_on_scheduled_run(
     monkeypatch.setattr(pipeline, "sh", fail_if_called)
 
     pipeline.main()
+
+
+def test_main_fails_fast_when_ffprobe_is_missing(
+    monkeypatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    """Missing local audio tooling should fail the run before entry retries begin.
+
+    Inputs: one pending entry plus a PATH lookup that lacks ffprobe.
+    Outputs: SystemExit describing the missing binary.
+    Edge cases: leaves retry bookkeeping untouched because the environment is not ready.
+    """
+
+    credentials_path = tmp_path / "gcp.json"
+    credentials_path.write_text("{}", encoding="utf-8")
+    state: dict[str, object] = {
+        "items": {},
+        "usage": {"cumulative_characters": 0},
+        "pending_deploy": False,
+    }
+
+    monkeypatch.setenv("RSS_URL", "https://example.com/feed.xml")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(credentials_path))
+    monkeypatch.setattr(pipeline, "RSS_URL", "https://example.com/feed.xml")
+    monkeypatch.setattr(pipeline, "ensure_kv_namespace_id", lambda: None)
+    monkeypatch.setattr(pipeline, "kv_get", lambda key: state)
+    monkeypatch.setattr(pipeline, "ia_has_episode_http", lambda identifier: False)
+    monkeypatch.setattr(
+        pipeline,
+        "fetch_entries_from_rss",
+        lambda: [
+            {
+                "article_title": "Example",
+                "article_link": "https://example.com/article",
+                "article_summary": "Summary",
+                "article_summary_html": "<p>Summary</p>",
+                "article_subtitle": "",
+                "article_pub_utc": "2026-04-03T10:00:00+00:00",
+                "article_image_url": "",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_validate_google_credentials_access",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        pipeline.shutil,
+        "which",
+        lambda command_name: (
+            f"/usr/bin/{command_name}" if command_name == "ffmpeg" else None
+        ),
+    )
+
+    with pytest.raises(
+        SystemExit,
+        match="missing required system binary 'ffprobe' on PATH",
+    ):
+        pipeline.main()
+
+
+def test_main_fails_fast_when_google_credentials_are_unusable(
+    monkeypatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    """Broken Google auth should fail as a sanity error instead of an entry retry.
+
+    Inputs: one pending entry plus a mocked credential refresh failure.
+    Outputs: SystemExit describing the credential sanity failure.
+    Edge cases: keeps the test local by mocking the credential refresh helper directly.
+    """
+
+    credentials_path = tmp_path / "gcp.json"
+    credentials_path.write_text("{}", encoding="utf-8")
+    state: dict[str, object] = {
+        "items": {},
+        "usage": {"cumulative_characters": 0},
+        "pending_deploy": False,
+    }
+
+    monkeypatch.setenv("RSS_URL", "https://example.com/feed.xml")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(credentials_path))
+    monkeypatch.setattr(pipeline, "RSS_URL", "https://example.com/feed.xml")
+    monkeypatch.setattr(pipeline, "ensure_kv_namespace_id", lambda: None)
+    monkeypatch.setattr(pipeline, "kv_get", lambda key: state)
+    monkeypatch.setattr(pipeline, "ia_has_episode_http", lambda identifier: False)
+    monkeypatch.setattr(
+        pipeline,
+        "fetch_entries_from_rss",
+        lambda: [
+            {
+                "article_title": "Example",
+                "article_link": "https://example.com/article",
+                "article_summary": "Summary",
+                "article_summary_html": "<p>Summary</p>",
+                "article_subtitle": "",
+                "article_pub_utc": "2026-04-03T10:00:00+00:00",
+                "article_image_url": "",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        pipeline.shutil,
+        "which",
+        lambda command_name: f"/usr/bin/{command_name}",
+    )
+
+    def fail_google_credentials_refresh() -> None:
+        raise RuntimeError("Unable to acquire impersonated credentials")
+
+    monkeypatch.setattr(
+        pipeline,
+        "_validate_google_credentials_access",
+        fail_google_credentials_refresh,
+    )
+
+    with pytest.raises(
+        SystemExit,
+        match="Google credential sanity check failed: Unable to acquire impersonated credentials",
+    ):
+        pipeline.main()
