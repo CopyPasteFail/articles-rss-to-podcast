@@ -349,7 +349,10 @@ def _should_skip_failed_entry(
     last_failed_pub = str(entry_state.get(FAILED_ENTRY_PUB_UTC_KEY, ""))
     retry_exhausted = bool(entry_state.get(FAILED_ENTRY_RETRY_EXHAUSTED_KEY, False))
     return bool(
-        retry_exhausted and last_failed_pub and entry_pub_utc and last_failed_pub == entry_pub_utc
+        retry_exhausted
+        and last_failed_pub
+        and entry_pub_utc
+        and last_failed_pub == entry_pub_utc
     )
 
 
@@ -372,7 +375,9 @@ def _record_entry_failure(
     Atomicity: not thread-safe; caller must persist in KV after mutation.
     """
     failure_timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    previous_attempt_count = int(entry_state.get(FAILED_ENTRY_ATTEMPT_COUNT_KEY, 0) or 0)
+    previous_attempt_count = int(
+        entry_state.get(FAILED_ENTRY_ATTEMPT_COUNT_KEY, 0) or 0
+    )
     failure_attempt_count = previous_attempt_count + 1
     retry_exhausted = failure_attempt_count >= max_retry_attempts
     entry_state[FAILED_ENTRY_AT_UTC_KEY] = failure_timestamp
@@ -954,13 +959,12 @@ def main() -> None:
             failure_attempt_count, stored_max_attempts, retry_exhausted = (
                 _get_failure_attempt_summary(entry_state)
             )
-            print(
-                "  → Retry attempts: "
-                f"{failure_attempt_count}/{stored_max_attempts}"
-            )
+            print(f"  → Retry attempts: {failure_attempt_count}/{stored_max_attempts}")
             if retry_exhausted:
                 exhausted_entries += 1
-                print("  → Retry limit reached; future scheduled runs will skip this entry")
+                print(
+                    "  → Retry limit reached; future scheduled runs will skip this entry"
+                )
             if failure_message:
                 print(f"  → Failure summary: {failure_message}")
             if not kv_put(state_key, state):

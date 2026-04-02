@@ -30,7 +30,9 @@ PROVIDER_ATTRIBUTE_MAPPING = {
 }
 
 
-def get_missing_required_google_service_names(*, pipeline_config: PipelineConfig) -> list[str]:
+def get_missing_required_google_service_names(
+    *, pipeline_config: PipelineConfig
+) -> list[str]:
     """Return required Google APIs that are not yet enabled for the project.
 
     Inputs: validated pipeline config with the shared Google project id.
@@ -89,10 +91,7 @@ def ensure_required_google_services_enabled(*, pipeline_config: PipelineConfig) 
         ],
         cwd=pipeline_config.repo_root,
     )
-    print(
-        "PASS: Enabled required Google APIs: "
-        f"{', '.join(missing_service_names)}"
-    )
+    print(f"PASS: Enabled required Google APIs: {', '.join(missing_service_names)}")
 
 
 def _read_provider_issuer_uri(provider_configuration: dict[str, object]) -> str | None:

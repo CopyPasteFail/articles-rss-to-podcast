@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pathlib
 
-from tools.pipeline_config import GitHubConfig, GoogleConfig, PipelineConfig, ScheduleConfig
+from tools.pipeline_config import (
+    GitHubConfig,
+    GoogleConfig,
+    PipelineConfig,
+    ScheduleConfig,
+)
 from tools.preflight import _required_google_services_check
 from tools.setup_gcp_oidc_shared import (
     ensure_required_google_services_enabled,
@@ -61,7 +66,9 @@ def test_get_missing_required_google_service_names_returns_missing_services(
 
     pipeline_config = build_pipeline_config()
 
-    def fake_run_command(command: list[str], *, cwd: pathlib.Path, check: bool = True) -> str:
+    def fake_run_command(
+        command: list[str], *, cwd: pathlib.Path, check: bool = True
+    ) -> str:
         assert command == [
             "gcloud",
             "services",
@@ -97,7 +104,9 @@ def test_ensure_required_google_services_enabled_enables_missing_services(
     pipeline_config = build_pipeline_config()
     observed_commands: list[list[str]] = []
 
-    def fake_run_command(command: list[str], *, cwd: pathlib.Path, check: bool = True) -> str:
+    def fake_run_command(
+        command: list[str], *, cwd: pathlib.Path, check: bool = True
+    ) -> str:
         observed_commands.append(command)
         assert cwd == pathlib.Path("/tmp/repo")
         assert check is True
