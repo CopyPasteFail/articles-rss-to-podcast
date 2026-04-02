@@ -38,6 +38,7 @@ def generate_workflow_yaml(pipeline_config: PipelineConfig) -> str:
 
     runtime_env_lines = "\n".join(
         [
+            "          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}",
             "          CF_PAGES_PROJECT: ${{ vars.CF_PAGES_PROJECT }}",
             "          CF_KV_NAMESPACE_ID: ${{ vars.CF_KV_NAMESPACE_ID }}",
             "          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}",
