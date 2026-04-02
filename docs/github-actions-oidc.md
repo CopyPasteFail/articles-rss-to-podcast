@@ -24,6 +24,7 @@ Each environment contains variables:
 - `GCP_SERVICE_ACCOUNT_EMAIL`
 - `CF_PAGES_PROJECT`
 - `CF_KV_NAMESPACE_ID`
+- `PODCAST_MAX_RETRY_ATTEMPTS`
 
 Each environment contains secrets:
 
@@ -46,6 +47,7 @@ with:
 env:
   CF_PAGES_PROJECT: ${{ vars.CF_PAGES_PROJECT }}
   CF_KV_NAMESPACE_ID: ${{ vars.CF_KV_NAMESPACE_ID }}
+  PODCAST_MAX_RETRY_ATTEMPTS: ${{ vars.PODCAST_MAX_RETRY_ATTEMPTS }}
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   IA_ACCESS_KEY: ${{ secrets.IA_ACCESS_KEY }}
   IA_SECRET_KEY: ${{ secrets.IA_SECRET_KEY }}
@@ -150,7 +152,7 @@ This helper ensures:
 
 - repository variables: `GCP_PROJECT_ID`, `GCP_PROJECT_NUMBER`, `GCP_WIF_POOL_ID`, `GCP_WIF_PROVIDER_ID`
 - GitHub environment `geektime-he`
-- environment variables: `GCP_SERVICE_ACCOUNT_EMAIL`, `CF_PAGES_PROJECT`, `CF_KV_NAMESPACE_ID`
+- environment variables: `GCP_SERVICE_ACCOUNT_EMAIL`, `CF_PAGES_PROJECT`, `CF_KV_NAMESPACE_ID`, `PODCAST_MAX_RETRY_ATTEMPTS`
 
 7. Push the environment secrets from local `.env`:
 

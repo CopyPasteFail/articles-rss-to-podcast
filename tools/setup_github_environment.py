@@ -19,6 +19,8 @@ from tools.pipeline_config import (
     load_pipeline_config,
 )
 
+DEFAULT_PODCAST_MAX_RETRY_ATTEMPTS = "3"
+
 
 def build_repository_variable_values(
     pipeline_config: PipelineConfig,
@@ -96,11 +98,19 @@ def build_environment_variable_values(
             "CLOUDFLARE_API_TOKEN, and an optional CF_KV_NAMESPACE_NAME."
         )
 
+    max_retry_attempts = (
+        env_values.get("PODCAST_MAX_RETRY_ATTEMPTS")
+        or DEFAULT_PODCAST_MAX_RETRY_ATTEMPTS
+    ).strip()
+    if not max_retry_attempts:
+        max_retry_attempts = DEFAULT_PODCAST_MAX_RETRY_ATTEMPTS
+
     return {
         "GCP_SERVICE_ACCOUNT_EMAIL": service_account_email,
         "CLOUDFLARE_ACCOUNT_ID": cloudflare_account_id,
         "CF_PAGES_PROJECT": cloudflare_pages_project,
         "CF_KV_NAMESPACE_ID": kv_namespace_id,
+        "PODCAST_MAX_RETRY_ATTEMPTS": max_retry_attempts,
     }
 
 

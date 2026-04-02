@@ -29,7 +29,9 @@ from tools.pipeline_config import (
     render_schedule_cron_entries,
 )
 from tools.setup_gcp_oidc_shared import (
+    REQUIRED_GOOGLE_SERVICE_NAMES,
     describe_provider_configuration,
+    get_missing_required_google_service_names,
     get_expected_provider_configuration,
     _read_provider_issuer_uri,
 )
@@ -568,6 +570,11 @@ def _gcp_resource_checks(
     resource_checks: list[CheckResult] = []
 
     resource_checks.append(
+        _required_google_services_check(
+            pipeline_config=pipeline_config,
+        )
+    )
+    resource_checks.append(
         _gcloud_describe_check(
             name="Workload Identity Pool",
             command=[
@@ -625,6 +632,53 @@ def _gcp_resource_checks(
         )
     )
     return resource_checks
+
+
+def _required_google_services_check(
+    *,
+    pipeline_config: PipelineConfig,
+) -> CheckResult:
+    """Verify required Google APIs are enabled for GitHub OIDC impersonation.
+
+    Inputs: repo root and validated pipeline config.
+    Outputs: one explicit preflight result.
+    Edge cases: surfaces gcloud inspection failures separately from missing APIs.
+    """
+
+    try:
+        missing_service_names = get_missing_required_google_service_names(
+            pipeline_config=pipeline_config
+        )
+    except CommandExecutionError as exc:
+        return CheckResult(
+            name="Required Google APIs",
+            status="MISCONFIGURED",
+            detail=exc.output or "Failed to inspect enabled Google APIs.",
+            next_action=(
+                "Fix gcloud access, then run `scripts/setup-gcp-oidc-shared.sh --pipeline "
+                f"{pipeline_config.pipeline_id}`."
+            ),
+        )
+
+    if not missing_service_names:
+        return CheckResult(
+            name="Required Google APIs",
+            status="PASS",
+            detail=(
+                "All required Google APIs are enabled: "
+                f"{', '.join(REQUIRED_GOOGLE_SERVICE_NAMES)}."
+            ),
+        )
+
+    return CheckResult(
+        name="Required Google APIs",
+        status="MISSING",
+        detail=f"Missing enabled Google APIs: {', '.join(missing_service_names)}",
+        next_action=(
+            "Run `scripts/setup-gcp-oidc-shared.sh --pipeline "
+            f"{pipeline_config.pipeline_id}` to enable the missing APIs."
+        ),
+    )
 
 
 def _repository_variable_check(

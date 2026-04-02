@@ -17,6 +17,7 @@ from tools.pipeline_config import PipelineConfig, load_pipeline_config
 
 
 EXPECTED_PROVIDER_ISSUER_URI = "https://token.actions.githubusercontent.com"
+REQUIRED_GOOGLE_SERVICE_NAMES = ("iamcredentials.googleapis.com",)
 PROVIDER_ATTRIBUTE_MAPPING = {
     "google.subject": "assertion.sub",
     "attribute.actor": "assertion.actor",
@@ -27,6 +28,71 @@ PROVIDER_ATTRIBUTE_MAPPING = {
     "attribute.ref": "assertion.ref",
     "attribute.workflow_ref": "assertion.workflow_ref",
 }
+
+
+def get_missing_required_google_service_names(*, pipeline_config: PipelineConfig) -> list[str]:
+    """Return required Google APIs that are not yet enabled for the project.
+
+    Inputs: validated pipeline config with the shared Google project id.
+    Outputs: sorted list of missing service API names.
+    Edge cases: raises when `gcloud services list` cannot be queried successfully.
+    """
+
+    google_config = pipeline_config.google
+    enabled_services_output = run_command(
+        [
+            "gcloud",
+            "services",
+            "list",
+            "--enabled",
+            "--project",
+            google_config.project_id,
+            "--format=value(config.name)",
+        ],
+        cwd=pipeline_config.repo_root,
+    )
+    enabled_service_names = {
+        service_name.strip()
+        for service_name in enabled_services_output.splitlines()
+        if service_name.strip()
+    }
+    return sorted(
+        required_service_name
+        for required_service_name in REQUIRED_GOOGLE_SERVICE_NAMES
+        if required_service_name not in enabled_service_names
+    )
+
+
+def ensure_required_google_services_enabled(*, pipeline_config: PipelineConfig) -> None:
+    """Enable the required Google APIs for GitHub OIDC-based impersonation.
+
+    Inputs: validated pipeline config with the shared Google project id.
+    Outputs: None. Mutates Google Service Usage state through `gcloud services enable`.
+    Edge cases: skips the enable call when all required APIs are already enabled.
+    """
+
+    missing_service_names = get_missing_required_google_service_names(
+        pipeline_config=pipeline_config
+    )
+    if not missing_service_names:
+        print("PASS: Required Google APIs are already enabled.")
+        return
+
+    run_command(
+        [
+            "gcloud",
+            "services",
+            "enable",
+            *missing_service_names,
+            "--project",
+            pipeline_config.google.project_id,
+        ],
+        cwd=pipeline_config.repo_root,
+    )
+    print(
+        "PASS: Enabled required Google APIs: "
+        f"{', '.join(missing_service_names)}"
+    )
 
 
 def _read_provider_issuer_uri(provider_configuration: dict[str, object]) -> str | None:
@@ -200,6 +266,7 @@ def ensure_shared_oidc_resources(
         ["gcloud", "config", "set", "project", google_config.project_id],
         cwd=pipeline_config.repo_root,
     )
+    ensure_required_google_services_enabled(pipeline_config=pipeline_config)
 
     pool_exists = True
     try:

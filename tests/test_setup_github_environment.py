@@ -93,6 +93,7 @@ def test_build_environment_variable_values_uses_explicit_kv_namespace_id() -> No
             "CLOUDFLARE_ACCOUNT_ID": "cloudflare-account-id",
             "CF_PAGES_PROJECT": "rss-podcast-pages",
             "CF_KV_NAMESPACE_ID": "kv-namespace-id",
+            "PODCAST_MAX_RETRY_ATTEMPTS": "5",
         },
     )
 
@@ -103,6 +104,7 @@ def test_build_environment_variable_values_uses_explicit_kv_namespace_id() -> No
         "CLOUDFLARE_ACCOUNT_ID": "cloudflare-account-id",
         "CF_PAGES_PROJECT": "rss-podcast-pages",
         "CF_KV_NAMESPACE_ID": "kv-namespace-id",
+        "PODCAST_MAX_RETRY_ATTEMPTS": "5",
     }
 
 
@@ -142,3 +144,31 @@ def test_generate_workflow_yaml_exports_cloudflare_account_id() -> None:
     workflow_yaml = generate_workflow_yaml(build_pipeline_config())
 
     assert "CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}" in workflow_yaml
+
+
+def test_build_environment_variable_values_defaults_retry_attempts() -> None:
+    """Environment helper should set a stable default retry limit when unset locally."""
+
+    pipeline_config = build_pipeline_config()
+
+    variable_values = build_environment_variable_values(
+        pipeline_config,
+        env_values={
+            "CLOUDFLARE_ACCOUNT_ID": "cloudflare-account-id",
+            "CF_PAGES_PROJECT": "rss-podcast-pages",
+            "CF_KV_NAMESPACE_ID": "kv-namespace-id",
+        },
+    )
+
+    assert variable_values["PODCAST_MAX_RETRY_ATTEMPTS"] == "3"
+
+
+def test_generate_workflow_yaml_exports_retry_attempt_limit() -> None:
+    """Generated workflows should expose the retry limit variable to the runtime job."""
+
+    workflow_yaml = generate_workflow_yaml(build_pipeline_config())
+
+    assert (
+        "PODCAST_MAX_RETRY_ATTEMPTS: ${{ vars.PODCAST_MAX_RETRY_ATTEMPTS }}"
+        in workflow_yaml
+    )

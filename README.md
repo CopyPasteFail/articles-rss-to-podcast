@@ -38,6 +38,7 @@ Each environment contains variables:
 - `GCP_SERVICE_ACCOUNT_EMAIL`
 - `CF_PAGES_PROJECT`
 - `CF_KV_NAMESPACE_ID`
+- `PODCAST_MAX_RETRY_ATTEMPTS`
 
 Each environment contains secrets:
 
@@ -56,6 +57,7 @@ Generated workflow files are safe to commit because they reference only GitHub v
 - `${{ vars.GCP_SERVICE_ACCOUNT_EMAIL }}`
 - `${{ vars.CF_PAGES_PROJECT }}`
 - `${{ vars.CF_KV_NAMESPACE_ID }}`
+- `${{ vars.PODCAST_MAX_RETRY_ATTEMPTS }}`
 - `${{ secrets.CLOUDFLARE_API_TOKEN }}`
 - `${{ secrets.IA_ACCESS_KEY }}`
 - `${{ secrets.IA_SECRET_KEY }}`
@@ -204,7 +206,7 @@ This helper uses local shared Google config plus local `.env` values to ensure:
 
 - repository variables: `GCP_PROJECT_ID`, `GCP_PROJECT_NUMBER`, `GCP_WIF_POOL_ID`, `GCP_WIF_PROVIDER_ID`
 - environment creation: `github.environment`
-- environment variables: `GCP_SERVICE_ACCOUNT_EMAIL`, `CF_PAGES_PROJECT`, `CF_KV_NAMESPACE_ID`
+- environment variables: `GCP_SERVICE_ACCOUNT_EMAIL`, `CF_PAGES_PROJECT`, `CF_KV_NAMESPACE_ID`, `PODCAST_MAX_RETRY_ATTEMPTS`
 
 7. Push the pipeline environment secrets from local `.env`.
 

@@ -193,6 +193,9 @@ FAILED_ENTRY_STEP_KEY = "last_failure_step"
 FAILED_ENTRY_MESSAGE_KEY = "last_failure_message"
 FAILED_ENTRY_IDENTIFIER_KEY = "last_failure_identifier"
 FAILED_ENTRY_LINK_KEY = "last_failure_link"
+FAILED_ENTRY_ATTEMPT_COUNT_KEY = "failure_attempt_count"
+FAILED_ENTRY_MAX_ATTEMPTS_KEY = "max_retry_attempts"
+FAILED_ENTRY_RETRY_EXHAUSTED_KEY = "retry_exhausted"
 FAILED_ENTRY_KEYS = (
     FAILED_ENTRY_AT_UTC_KEY,
     FAILED_ENTRY_PUB_UTC_KEY,
@@ -200,10 +203,15 @@ FAILED_ENTRY_KEYS = (
     FAILED_ENTRY_MESSAGE_KEY,
     FAILED_ENTRY_IDENTIFIER_KEY,
     FAILED_ENTRY_LINK_KEY,
+    FAILED_ENTRY_ATTEMPT_COUNT_KEY,
+    FAILED_ENTRY_MAX_ATTEMPTS_KEY,
+    FAILED_ENTRY_RETRY_EXHAUSTED_KEY,
 )
 FAILURE_STEP_GENERATE_AUDIO = "one_episode"
 RETRY_FAILED_ENV_NAME = "PODCAST_RETRY_FAILED"
 RETRY_FAILED_VALUES = {"1", "true", "yes", "y"}
+MAX_RETRY_ATTEMPTS_ENV_NAME = "PODCAST_MAX_RETRY_ATTEMPTS"
+DEFAULT_MAX_RETRY_ATTEMPTS = 3
 
 
 def _prepare_subprocess_command(args: tuple[object, ...]) -> list[str]:
@@ -297,21 +305,52 @@ def _is_retry_failed_enabled() -> bool:
     return raw_value in RETRY_FAILED_VALUES
 
 
+def _get_max_retry_attempts() -> int:
+    """Return the configured automatic retry limit for failed entries.
+
+    Inputs: none (reads MAX_RETRY_ATTEMPTS_ENV_NAME from the environment).
+    Outputs: positive integer max-attempt count.
+    Edge cases: blank, invalid, or non-positive values fall back to the default.
+    """
+
+    raw_value = os.getenv(MAX_RETRY_ATTEMPTS_ENV_NAME, "").strip()
+    if not raw_value:
+        return DEFAULT_MAX_RETRY_ATTEMPTS
+    try:
+        parsed_value = int(raw_value)
+    except ValueError:
+        print(
+            f"[warn] Invalid {MAX_RETRY_ATTEMPTS_ENV_NAME}={raw_value!r}; "
+            f"using default {DEFAULT_MAX_RETRY_ATTEMPTS}"
+        )
+        return DEFAULT_MAX_RETRY_ATTEMPTS
+    if parsed_value <= 0:
+        print(
+            f"[warn] Non-positive {MAX_RETRY_ATTEMPTS_ENV_NAME}={parsed_value}; "
+            f"using default {DEFAULT_MAX_RETRY_ATTEMPTS}"
+        )
+        return DEFAULT_MAX_RETRY_ATTEMPTS
+    return parsed_value
+
+
 def _should_skip_failed_entry(
     entry_state: JSONDict,
     entry_pub_utc: str,
     retry_failed_entries: bool,
 ) -> bool:
-    """Determine whether to skip a previously failed entry for the same publication time.
+    """Determine whether to skip a previously failed exhausted entry.
 
     Inputs: entry_state dict, entry_pub_utc string, and retry flag.
     Outputs: True when the entry should be skipped, False otherwise.
-    Edge cases: missing failure metadata, empty publication timestamps.
+    Edge cases: non-exhausted failed entries are retried automatically on later runs.
     """
     if retry_failed_entries:
         return False
     last_failed_pub = str(entry_state.get(FAILED_ENTRY_PUB_UTC_KEY, ""))
-    return bool(last_failed_pub and entry_pub_utc and last_failed_pub == entry_pub_utc)
+    retry_exhausted = bool(entry_state.get(FAILED_ENTRY_RETRY_EXHAUSTED_KEY, False))
+    return bool(
+        retry_exhausted and last_failed_pub and entry_pub_utc and last_failed_pub == entry_pub_utc
+    )
 
 
 def _record_entry_failure(
@@ -322,21 +361,29 @@ def _record_entry_failure(
     entry_pub_utc: str,
     step: str,
     message: str,
+    max_retry_attempts: int,
 ) -> None:
-    """Annotate entry_state with failure metadata for later diagnostics and skipping.
+    """Annotate entry_state with failure metadata for later diagnostics and retries.
 
-    Inputs: entry_state dict (mutated), identifier, link, entry_pub_utc, step name, message.
+    Inputs: entry_state dict (mutated), identifier, link, entry_pub_utc, step name,
+    message, and configured max retry attempts.
     Outputs: None (mutates entry_state in place).
     Edge cases: empty message or timestamps; caller is responsible for persistence.
     Atomicity: not thread-safe; caller must persist in KV after mutation.
     """
     failure_timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    previous_attempt_count = int(entry_state.get(FAILED_ENTRY_ATTEMPT_COUNT_KEY, 0) or 0)
+    failure_attempt_count = previous_attempt_count + 1
+    retry_exhausted = failure_attempt_count >= max_retry_attempts
     entry_state[FAILED_ENTRY_AT_UTC_KEY] = failure_timestamp
     entry_state[FAILED_ENTRY_PUB_UTC_KEY] = entry_pub_utc
     entry_state[FAILED_ENTRY_STEP_KEY] = step
     entry_state[FAILED_ENTRY_MESSAGE_KEY] = message
     entry_state[FAILED_ENTRY_IDENTIFIER_KEY] = identifier
     entry_state[FAILED_ENTRY_LINK_KEY] = link
+    entry_state[FAILED_ENTRY_ATTEMPT_COUNT_KEY] = failure_attempt_count
+    entry_state[FAILED_ENTRY_MAX_ATTEMPTS_KEY] = max_retry_attempts
+    entry_state[FAILED_ENTRY_RETRY_EXHAUSTED_KEY] = retry_exhausted
 
 
 def _clear_entry_failure(entry_state: JSONDict) -> None:
@@ -349,6 +396,26 @@ def _clear_entry_failure(entry_state: JSONDict) -> None:
     """
     for key in FAILED_ENTRY_KEYS:
         entry_state.pop(key, None)
+
+
+def _get_failure_attempt_summary(entry_state: JSONDict) -> tuple[int, int, bool]:
+    """Return normalized retry-attempt state for one entry.
+
+    Inputs: entry_state dict.
+    Outputs: (attempt_count, max_attempts, retry_exhausted).
+    Edge cases: legacy entries without retry metadata fall back to configured defaults.
+    """
+
+    attempt_count = int(entry_state.get(FAILED_ENTRY_ATTEMPT_COUNT_KEY, 0) or 0)
+    max_attempts = int(
+        entry_state.get(FAILED_ENTRY_MAX_ATTEMPTS_KEY, _get_max_retry_attempts()) or 0
+    )
+    if max_attempts <= 0:
+        max_attempts = _get_max_retry_attempts()
+    retry_exhausted = bool(entry_state.get(FAILED_ENTRY_RETRY_EXHAUSTED_KEY, False))
+    if attempt_count >= max_attempts:
+        retry_exhausted = True
+    return attempt_count, max_attempts, retry_exhausted
 
 
 def git_info() -> tuple[str | None, str | None]:
@@ -722,6 +789,9 @@ def main() -> None:
     processed = False
     run_characters = 0
     retry_failed_entries = _is_retry_failed_enabled()
+    max_retry_attempts = _get_max_retry_attempts()
+    attempted_entries = 0
+    exhausted_entries = 0
 
     def estimate_characters(meta_like: Mapping[str, Any]) -> int:
         """Approximate characters for billing before we run expensive TTS work."""
@@ -779,14 +849,24 @@ def main() -> None:
         print(f"  IA has audio: {ia_present}")
         print(f"  feed already updated: {already_in_feed}")
 
+        failure_attempt_count, stored_max_attempts, retry_exhausted = (
+            _get_failure_attempt_summary(entry_state)
+        )
+        if failure_attempt_count:
+            print(
+                "  previous failed attempts: "
+                f"{failure_attempt_count}/{stored_max_attempts}"
+            )
+
         if _should_skip_failed_entry(
             entry_state, entry["article_pub_utc"], retry_failed_entries
         ):
             last_failed_at = entry_state.get(FAILED_ENTRY_AT_UTC_KEY, "")
             last_failed_step = entry_state.get(FAILED_ENTRY_STEP_KEY, "")
             print(
-                "  → Skipping previously failed entry "
-                f"(last_failure_at={last_failed_at}, step={last_failed_step})"
+                "  → Skipping retry-exhausted entry "
+                f"(last_failure_at={last_failed_at}, step={last_failed_step}, "
+                f"attempts={failure_attempt_count}/{stored_max_attempts})"
             )
             print(f"  → Set {RETRY_FAILED_ENV_NAME}=1 to retry this entry")
             continue
@@ -839,6 +919,7 @@ def main() -> None:
             continue
 
         # Otherwise we need to synthesize + upload
+        attempted_entries += 1
         if not gcp_ready:
             sa = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
             if not pathlib.Path(sa).exists():
@@ -865,10 +946,21 @@ def main() -> None:
                 entry_pub_utc=entry["article_pub_utc"],
                 step=FAILURE_STEP_GENERATE_AUDIO,
                 message=failure_message,
+                max_retry_attempts=max_retry_attempts,
             )
             items[identifier] = entry_state
             print("  → ERROR: one_episode.py failed; continuing to next entry")
             print(f"  → Failure stored for id={identifier} link={link}")
+            failure_attempt_count, stored_max_attempts, retry_exhausted = (
+                _get_failure_attempt_summary(entry_state)
+            )
+            print(
+                "  → Retry attempts: "
+                f"{failure_attempt_count}/{stored_max_attempts}"
+            )
+            if retry_exhausted:
+                exhausted_entries += 1
+                print("  → Retry limit reached; future scheduled runs will skip this entry")
             if failure_message:
                 print(f"  → Failure summary: {failure_message}")
             if not kv_put(state_key, state):
@@ -961,7 +1053,7 @@ def main() -> None:
         print(f"  Feed updated -> {pathlib.Path(feed_xml).resolve()}")
         print(f"  Audio: {ia_url}")
 
-    if not processed:
+    if attempted_entries == 0 and not processed:
         print("No pending entries - everything up to date")
 
     cumulative = usage.get("cumulative_characters", 0)
@@ -1034,6 +1126,13 @@ def main() -> None:
                 print("Deploy skipped (missing configuration); will retry when ready")
     else:
         print("Feed unchanged; skipping deploy")
+
+    if exhausted_entries > 0:
+        raise SystemExit(
+            "Retry limit reached for "
+            f"{exhausted_entries} entr{'y' if exhausted_entries == 1 else 'ies'}; "
+            "manual retry required for exhausted failures."
+        )
 
 
 def deploy_pages() -> tuple[bool, bool]:

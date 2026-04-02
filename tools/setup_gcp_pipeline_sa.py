@@ -13,6 +13,7 @@ from tools.command_utils import (
     run_json_command,
 )
 from tools.pipeline_config import build_workflow_ref, load_pipeline_config
+from tools.setup_gcp_oidc_shared import ensure_required_google_services_enabled
 
 
 def build_workload_identity_member(
@@ -208,6 +209,7 @@ def ensure_pipeline_service_account(
         ["gcloud", "config", "set", "project", google_config.project_id],
         cwd=pipeline_config.repo_root,
     )
+    ensure_required_google_services_enabled(pipeline_config=pipeline_config)
 
     service_account_exists = True
     try:
