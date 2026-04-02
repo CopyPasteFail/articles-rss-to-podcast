@@ -41,6 +41,7 @@ def generate_workflow_yaml(pipeline_config: PipelineConfig) -> str:
             "          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}",
             "          CF_PAGES_PROJECT: ${{ vars.CF_PAGES_PROJECT }}",
             "          CF_KV_NAMESPACE_ID: ${{ vars.CF_KV_NAMESPACE_ID }}",
+            "          IA_ID_PREFIX: ${{ vars.IA_ID_PREFIX }}",
             "          PODCAST_MAX_RETRY_ATTEMPTS: ${{ vars.PODCAST_MAX_RETRY_ATTEMPTS }}",
             "          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}",
             "          IA_ACCESS_KEY: ${{ secrets.IA_ACCESS_KEY }}",

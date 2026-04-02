@@ -104,6 +104,7 @@ def test_build_environment_variable_values_uses_explicit_kv_namespace_id() -> No
         "CLOUDFLARE_ACCOUNT_ID": "cloudflare-account-id",
         "CF_PAGES_PROJECT": "rss-podcast-pages",
         "CF_KV_NAMESPACE_ID": "kv-namespace-id",
+        "IA_ID_PREFIX": "geektime-v2",
         "PODCAST_MAX_RETRY_ATTEMPTS": "5",
     }
 
@@ -163,6 +164,23 @@ def test_build_environment_variable_values_defaults_retry_attempts() -> None:
     assert variable_values["PODCAST_MAX_RETRY_ATTEMPTS"] == "3"
 
 
+def test_build_environment_variable_values_defaults_ia_id_prefix() -> None:
+    """Environment helper should keep IA identifiers stable when unset locally."""
+
+    pipeline_config = build_pipeline_config()
+
+    variable_values = build_environment_variable_values(
+        pipeline_config,
+        env_values={
+            "CLOUDFLARE_ACCOUNT_ID": "cloudflare-account-id",
+            "CF_PAGES_PROJECT": "rss-podcast-pages",
+            "CF_KV_NAMESPACE_ID": "kv-namespace-id",
+        },
+    )
+
+    assert variable_values["IA_ID_PREFIX"] == "geektime-v2"
+
+
 def test_generate_workflow_yaml_exports_retry_attempt_limit() -> None:
     """Generated workflows should expose the retry limit variable to the runtime job."""
 
@@ -172,6 +190,14 @@ def test_generate_workflow_yaml_exports_retry_attempt_limit() -> None:
         "PODCAST_MAX_RETRY_ATTEMPTS: ${{ vars.PODCAST_MAX_RETRY_ATTEMPTS }}"
         in workflow_yaml
     )
+
+
+def test_generate_workflow_yaml_exports_ia_id_prefix() -> None:
+    """Generated workflows should expose IA_ID_PREFIX to the runtime job."""
+
+    workflow_yaml = generate_workflow_yaml(build_pipeline_config())
+
+    assert "IA_ID_PREFIX: ${{ vars.IA_ID_PREFIX }}" in workflow_yaml
 
 
 def test_generate_workflow_yaml_installs_ffmpeg() -> None:

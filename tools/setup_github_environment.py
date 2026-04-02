@@ -20,6 +20,7 @@ from tools.pipeline_config import (
 )
 
 DEFAULT_PODCAST_MAX_RETRY_ATTEMPTS = "3"
+DEFAULT_IA_ID_PREFIX_TEMPLATE = "{feed_slug}-v2"
 
 
 def build_repository_variable_values(
@@ -105,11 +106,21 @@ def build_environment_variable_values(
     if not max_retry_attempts:
         max_retry_attempts = DEFAULT_PODCAST_MAX_RETRY_ATTEMPTS
 
+    ia_id_prefix = (
+        env_values.get("IA_ID_PREFIX")
+        or DEFAULT_IA_ID_PREFIX_TEMPLATE.format(feed_slug=pipeline_config.feed_slug)
+    ).strip()
+    if not ia_id_prefix:
+        ia_id_prefix = DEFAULT_IA_ID_PREFIX_TEMPLATE.format(
+            feed_slug=pipeline_config.feed_slug
+        )
+
     return {
         "GCP_SERVICE_ACCOUNT_EMAIL": service_account_email,
         "CLOUDFLARE_ACCOUNT_ID": cloudflare_account_id,
         "CF_PAGES_PROJECT": cloudflare_pages_project,
         "CF_KV_NAMESPACE_ID": kv_namespace_id,
+        "IA_ID_PREFIX": ia_id_prefix,
         "PODCAST_MAX_RETRY_ATTEMPTS": max_retry_attempts,
     }
 

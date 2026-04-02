@@ -45,6 +45,18 @@ class EpisodePayload(TypedDict):
     article_image_url: NotRequired[str]
 
 
+class ExistingFeedItem(TypedDict):
+    """Represent the subset of an existing RSS item needed for dedupe decisions."""
+
+    title: str
+    description: str
+    pub_date: str
+    audio_url: str
+    audio_length: str
+    guid: str
+    image_url: str
+
+
 class PodcastExtension(Protocol):
     """Feedgen's iTunes extension interface (subset used by this script)."""
 
@@ -98,10 +110,6 @@ class FeedGeneratorProtocol(Protocol):
 
     def add_entry(self) -> FeedEntryProtocol: ...
 
-
-FeedItem = tuple[
-    str | None, str | None, str | None, str | None, str | None, str | None, str
-]
 
 ITUNES_NS = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
 
@@ -170,11 +178,60 @@ def _valid_itunes_image(url: str | None) -> bool:
     return parsed.path.lower().endswith((".jpg", ".png"))
 
 
+def _build_episode_guid(episode_payload: EpisodePayload) -> str:
+    """Return the deterministic RSS guid for one episode payload.
+
+    Inputs: episode payload with audio_url and optional article_link.
+    Outputs: stable SHA-1 guid string used by the RSS feed.
+    Edge cases: empty article_link still yields a stable guid based on audio_url.
+    """
+
+    return hashlib.sha1(
+        (
+            episode_payload["audio_url"] + episode_payload.get("article_link", "")
+        ).encode("utf-8"),
+        usedforsecurity=False,
+    ).hexdigest()
+
+
+def _existing_item_matches_episode(
+    existing_item: ExistingFeedItem,
+    episode_payload: EpisodePayload,
+) -> bool:
+    """Decide whether an existing RSS item already represents the same article.
+
+    Inputs: one parsed existing feed item and the new episode payload.
+    Outputs: True when the new episode should replace nothing because it is already present.
+    Edge cases: matches first on article link, then falls back to guid, then title+pubDate.
+    """
+
+    article_link = (episode_payload.get("article_link") or "").strip()
+    if article_link and article_link in existing_item["description"]:
+        return True
+
+    if existing_item["guid"] == _build_episode_guid(episode_payload):
+        return True
+
+    try:
+        pub_date = datetime.datetime.fromisoformat(
+            episode_payload["article_pub_utc"]
+        ).astimezone(ZoneInfo("Asia/Jerusalem"))
+        expected_pub_date = rfc2822(pub_date)
+    except Exception:
+        expected_pub_date = ""
+
+    return bool(
+        existing_item["title"] == episode_payload["article_title"]
+        and expected_pub_date
+        and existing_item["pub_date"] == expected_pub_date
+    )
+
+
 def add_item(
     feed_path: str, channel_meta: ChannelMeta, ep: EpisodePayload, keep_last: int = 200
 ) -> None:
     """Append the episode described by ``ep`` and trim the feed to ``keep_last`` items."""
-    items: list[FeedItem] = []
+    items: list[ExistingFeedItem] = []
     if os.path.exists(feed_path):
         tree = ET.parse(feed_path)
         root = tree.getroot()
@@ -192,7 +249,17 @@ def add_item(
                 image_url = image_el.get("href") or (image_el.text or "")
             if not _valid_itunes_image(image_url):
                 image_url = ""
-            items.append((title, desc, link, pub, length, guid, image_url))
+            items.append(
+                ExistingFeedItem(
+                    title=title or "",
+                    description=desc or "",
+                    audio_url=link or "",
+                    pub_date=pub or "",
+                    audio_length=length or "",
+                    guid=guid or "",
+                    image_url=image_url,
+                )
+            )
 
     fg = _create_feed_generator()
     fg.load_extension("podcast")
@@ -214,18 +281,28 @@ def add_item(
 
     channel_has_image = bool(channel_meta.get("image"))
 
-    for t, d, audio_url, p, audio_length, g, img in items[:keep_last]:
+    unique_existing_items: list[ExistingFeedItem] = []
+    for existing_item in items:
+        if _existing_item_matches_episode(existing_item, ep):
+            continue
+        unique_existing_items.append(existing_item)
+
+    for existing_item in unique_existing_items[:keep_last]:
         fe = fg.add_entry()
-        fe.title(t or "")
-        fe.description(d or "")
-        if p:
-            fe.pubDate(p)
-        if audio_url:
-            fe.enclosure(audio_url, str(audio_length or 0), "audio/mpeg")
-        if g:
-            fe.guid(g, permalink=False)
-        if not channel_has_image and _valid_itunes_image(img):
-            fe.podcast.itunes_image(img)
+        fe.title(existing_item["title"])
+        fe.description(existing_item["description"])
+        if existing_item["pub_date"]:
+            fe.pubDate(existing_item["pub_date"])
+        if existing_item["audio_url"]:
+            fe.enclosure(
+                existing_item["audio_url"],
+                str(existing_item["audio_length"] or 0),
+                "audio/mpeg",
+            )
+        if existing_item["guid"]:
+            fe.guid(existing_item["guid"], permalink=False)
+        if not channel_has_image and _valid_itunes_image(existing_item["image_url"]):
+            fe.podcast.itunes_image(existing_item["image_url"])
 
     fe = fg.add_entry()
     fe.title(ep["article_title"])
@@ -258,13 +335,7 @@ def add_item(
 
     size = get_len(ep["audio_url"]) or 0
     fe.enclosure(ep["audio_url"], str(size), "audio/mpeg")
-    fe.guid(
-        hashlib.sha1(
-            (ep["audio_url"] + ep.get("article_link", "")).encode("utf-8"),
-            usedforsecurity=False,
-        ).hexdigest(),
-        permalink=False,
-    )
+    fe.guid(_build_episode_guid(ep), permalink=False)
     if not channel_has_image:
         episode_img = ep.get("article_image_url") or ""
         if _valid_itunes_image(episode_img):
