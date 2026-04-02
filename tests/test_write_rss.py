@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pathlib
+import importlib
 import sys
 import types
 import xml.etree.ElementTree as ET
@@ -149,7 +150,11 @@ feedgen_module.feed = feedgen_feed_module
 sys.modules.setdefault("feedgen", feedgen_module)
 sys.modules.setdefault("feedgen.feed", feedgen_feed_module)
 
-from write_rss import ChannelMeta, EpisodePayload, add_item, ensure_base_feed
+write_rss_module = importlib.import_module("write_rss")
+ChannelMeta = write_rss_module.ChannelMeta
+EpisodePayload = write_rss_module.EpisodePayload
+add_item = write_rss_module.add_item
+ensure_base_feed = write_rss_module.ensure_base_feed
 
 
 def build_channel_meta() -> ChannelMeta:

@@ -187,9 +187,9 @@ def _build_episode_guid(episode_payload: EpisodePayload) -> str:
     """
 
     return hashlib.sha1(
-        (
-            episode_payload["audio_url"] + episode_payload.get("article_link", "")
-        ).encode("utf-8"),
+        (episode_payload["audio_url"] + episode_payload.get("article_link", "")).encode(
+            "utf-8"
+        ),
         usedforsecurity=False,
     ).hexdigest()
 
