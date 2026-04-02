@@ -149,7 +149,15 @@ def resolve_repository_name_with_owner(repo_root: pathlib.Path) -> str | None:
     if command_exists("gh"):
         try:
             repository = run_command(
-                ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
+                [
+                    "gh",
+                    "repo",
+                    "view",
+                    "--json",
+                    "nameWithOwner",
+                    "--jq",
+                    ".nameWithOwner",
+                ],
                 cwd=repo_root,
             ).strip()
             if repository:
@@ -187,7 +195,9 @@ def detect_repo_context(start_path: pathlib.Path | None = None) -> RepoContext:
 
     repo_root = detect_repo_root(start_path)
     if repo_root is None:
-        raise RuntimeError("Could not detect the repository root from the current directory.")
+        raise RuntimeError(
+            "Could not detect the repository root from the current directory."
+        )
     repository = resolve_repository_name_with_owner(repo_root)
     return RepoContext(root=repo_root, repository=repository)
 
@@ -212,7 +222,9 @@ def load_root_env_values(repo_root: pathlib.Path) -> dict[str, str]:
     return merged_values
 
 
-def ensure_repo_relative_path(repo_root: pathlib.Path, relative_path: str) -> pathlib.Path:
+def ensure_repo_relative_path(
+    repo_root: pathlib.Path, relative_path: str
+) -> pathlib.Path:
     """Resolve a repo-relative path and reject paths that escape the repository."""
 
     resolved_path = (repo_root / relative_path).resolve()
@@ -233,7 +245,9 @@ def resolve_cloudflare_kv_namespace_id(
 
     account_id = (env_values.get("CLOUDFLARE_ACCOUNT_ID") or "").strip()
     api_token = (env_values.get("CLOUDFLARE_API_TOKEN") or "").strip()
-    namespace_name = (env_values.get("CF_KV_NAMESPACE_NAME") or "tts-podcast-state").strip()
+    namespace_name = (
+        env_values.get("CF_KV_NAMESPACE_NAME") or "tts-podcast-state"
+    ).strip()
     if not account_id or not api_token or not namespace_name:
         return None
 

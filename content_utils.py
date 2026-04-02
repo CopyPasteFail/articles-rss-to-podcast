@@ -48,7 +48,9 @@ def _extract_value_field(data: Any) -> str | None:
     return None
 
 
-def _coerce_sequence(value: _SeqItem | list[_SeqItem] | tuple[_SeqItem, ...] | None) -> list[_SeqItem]:
+def _coerce_sequence(
+    value: _SeqItem | list[_SeqItem] | tuple[_SeqItem, ...] | None,
+) -> list[_SeqItem]:
     """Turn lone values into lists so image scanning code can iterate safely."""
     if value is None:
         return []
@@ -90,7 +92,19 @@ def _looks_like_footer(line: str) -> bool:
     if low in {"גיקטיים", "geektime", "appeared first on", "the post"}:
         return True
     return False
-_MEDIA_TAGS = ("figure", "figcaption", "img", "picture", "video", "iframe", "embed", "object", "source")
+
+
+_MEDIA_TAGS = (
+    "figure",
+    "figcaption",
+    "img",
+    "picture",
+    "video",
+    "iframe",
+    "embed",
+    "object",
+    "source",
+)
 _HEADING_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6")
 _SUBTITLE_TAGS = ("h2", "h3", "h4")
 
@@ -135,6 +149,7 @@ def _extract_subtitle_and_strip_headings(soup: BeautifulSoup) -> str:
         if element.name == "p" and element.get_text(strip=True):
             body_started = True
     return subtitle
+
 
 def _get_entry_content_html(entry: Any) -> str:
     """Return the richest HTML snippet available on the feed entry."""
@@ -211,7 +226,9 @@ def _extract_first_image_url(soup: BeautifulSoup, base_url: str | None = None) -
     return ""
 
 
-def html_to_text(html_content: str, *, base_url: str | None = None) -> tuple[str, str, str]:
+def html_to_text(
+    html_content: str, *, base_url: str | None = None
+) -> tuple[str, str, str]:
     """Convert HTML into (text, subtitle, lead_image) so TTS reads natural prose."""
     if not html_content:
         return "", "", ""

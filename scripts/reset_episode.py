@@ -40,7 +40,9 @@ def delete_path(path: pathlib.Path, *, dry_run: bool) -> bool:
     return True
 
 
-def cleanup_local(link: str, *, root: pathlib.Path, out_dir: pathlib.Path, dry_run: bool) -> list[str]:
+def cleanup_local(
+    link: str, *, root: pathlib.Path, out_dir: pathlib.Path, dry_run: bool
+) -> list[str]:
     """Remove all local artifacts for the target article."""
     removed: list[str] = []
     seen: set[pathlib.Path] = set()
@@ -73,7 +75,9 @@ def cleanup_local(link: str, *, root: pathlib.Path, out_dir: pathlib.Path, dry_r
         import pipeline  # imported lazily so env is loaded first
 
         hash_sidecar = out_dir / f"sidecar-{pipeline.link_hash(link)}.json"
-        if hash_sidecar.resolve() not in seen and delete_path(hash_sidecar.resolve(), dry_run=dry_run):
+        if hash_sidecar.resolve() not in seen and delete_path(
+            hash_sidecar.resolve(), dry_run=dry_run
+        ):
             removed.append(str(hash_sidecar.resolve()))
     except Exception:
         pass
@@ -82,10 +86,16 @@ def cleanup_local(link: str, *, root: pathlib.Path, out_dir: pathlib.Path, dry_r
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Reset a single episode (local + KV) so it can be regenerated.")
+    parser = argparse.ArgumentParser(
+        description="Reset a single episode (local + KV) so it can be regenerated."
+    )
     parser.add_argument("slug", help="Feed slug, e.g. geektime")
     parser.add_argument("article_link", help="Original article URL from the RSS feed")
-    parser.add_argument("--dry-run", action="store_true", help="Print actions without modifying anything")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print actions without modifying anything",
+    )
     args = parser.parse_args()
 
     root = pathlib.Path(__file__).resolve().parent.parent
@@ -96,7 +106,9 @@ def main() -> None:
     import pipeline
 
     if pipeline.SLUG != args.slug:
-        print(f"[warn] PODCAST_SLUG={pipeline.SLUG!r} (from env) does not match CLI slug {args.slug!r}")
+        print(
+            f"[warn] PODCAST_SLUG={pipeline.SLUG!r} (from env) does not match CLI slug {args.slug!r}"
+        )
 
     identifier = pipeline.ia_identifier_for_link(args.article_link)
     state_key = f"feed:{pipeline.SLUG}"
@@ -130,13 +142,19 @@ def main() -> None:
     elif args.dry_run:
         print("[dry-run] Skipping KV write")
 
-    removed_local = cleanup_local(args.article_link, root=root, out_dir=pipeline.OUT, dry_run=args.dry_run)
+    removed_local = cleanup_local(
+        args.article_link, root=root, out_dir=pipeline.OUT, dry_run=args.dry_run
+    )
     if removed_local:
         print(f"[ok] Removed {len(removed_local)} local file(s)")
     else:
         print("[info] No local artifacts matched that article")
 
-    print("\nNext run `python run_feed.py {}` to regenerate the episode.".format(args.slug))
+    print(
+        "\nNext run `python run_feed.py {}` to regenerate the episode.".format(
+            args.slug
+        )
+    )
 
 
 if __name__ == "__main__":

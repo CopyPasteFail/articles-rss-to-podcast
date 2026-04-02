@@ -24,8 +24,12 @@ def build_failure_email_body(
 
     log_tail_lines = []
     if log_path.exists():
-        log_tail_lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-LOG_TAIL_LINE_COUNT:]
-    log_tail_text = "\n".join(log_tail_lines) if log_tail_lines else "(log file missing)"
+        log_tail_lines = log_path.read_text(
+            encoding="utf-8", errors="replace"
+        ).splitlines()[-LOG_TAIL_LINE_COUNT:]
+    log_tail_text = (
+        "\n".join(log_tail_lines) if log_tail_lines else "(log file missing)"
+    )
     return (
         f"Pipeline: {pipeline_id}\n"
         f"Exit code: {exit_code}\n"
@@ -75,7 +79,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Send a pipeline failure email.")
     parser.add_argument("--pipeline-id", required=True)
     parser.add_argument("--subject-prefix", required=True)
-    parser.add_argument("--recipients", required=True, help="Comma-separated recipients.")
+    parser.add_argument(
+        "--recipients", required=True, help="Comma-separated recipients."
+    )
     parser.add_argument("--log-path", required=True)
     parser.add_argument("--exit-code", required=True)
     args = parser.parse_args(argv)
@@ -87,12 +93,20 @@ def main(argv: list[str] | None = None) -> int:
         "SMTP_PASSWORD",
         "SMTP_FROM",
     ]
-    missing_env_names = [env_name for env_name in required_env_names if not os.getenv(env_name, "").strip()]
+    missing_env_names = [
+        env_name
+        for env_name in required_env_names
+        if not os.getenv(env_name, "").strip()
+    ]
     if missing_env_names:
         missing_text = ", ".join(missing_env_names)
         raise RuntimeError(f"Missing SMTP env vars: {missing_text}")
 
-    recipients = [recipient.strip() for recipient in args.recipients.split(",") if recipient.strip()]
+    recipients = [
+        recipient.strip()
+        for recipient in args.recipients.split(",")
+        if recipient.strip()
+    ]
     if not recipients:
         raise RuntimeError("At least one failure email recipient is required.")
 

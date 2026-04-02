@@ -4,7 +4,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Iterable, List, Mapping, Optional, Sequence, Tuple, TypedDict, Union, cast
+from typing import (
+    Any,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    TypedDict,
+    Union,
+    cast,
+)
 import os
 
 from google.cloud import bigquery
@@ -14,7 +25,9 @@ from google.cloud.bigquery.table import Row as BigQueryRow
 DEFAULT_BILLING_EXPORT_TABLE = (
     "example-project.example_billing.gcp_billing_export_v1_FAKE123_FAKE456"
 )
-BILLING_EXPORT_TABLE = os.environ.get("BILLING_EXPORT_TABLE", DEFAULT_BILLING_EXPORT_TABLE)
+BILLING_EXPORT_TABLE = os.environ.get(
+    "BILLING_EXPORT_TABLE", DEFAULT_BILLING_EXPORT_TABLE
+)
 FREE_TIER_STANDARD = int(os.environ.get("FREE_TIER_STANDARD", "4000000"))
 FREE_TIER_PREMIUM = int(os.environ.get("FREE_TIER_PREMIUM", "1000000"))
 
@@ -83,6 +96,7 @@ FROM daily
 
 ORDER BY section, label
 """
+
 
 @dataclass
 class UsageRow:
@@ -185,13 +199,15 @@ def fetch_tts_usage(client: Optional[bigquery.Client] = None) -> UsageReport:
                 "label": r.label,
                 "characters": r.characters,
                 "free_tier_remaining": r.free_tier_remaining or 0,
-            } for r in by_group
+            }
+            for r in by_group
         ],
         "daily": [
             {
                 "label": r.label,
                 "characters": r.characters,
-            } for r in daily
+            }
+            for r in daily
         ],
     }
 
@@ -207,8 +223,10 @@ def _print_table(headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
                 widths[i] = max(widths[i], len(c))
             else:
                 widths.append(len(c))
+
     def fmt(row: Sequence[str]) -> str:
         return "  ".join(f"{val:<{widths[i]}}" for i, val in enumerate(row))
+
     print(fmt(headers))
     for r in string_rows:
         print(fmt(r))
@@ -217,11 +235,17 @@ def _print_table(headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
 def print_usage_report(data: Mapping[str, Any]) -> None:
     """Simple CLI front-end for fetch_tts_usage (used locally and in automation)."""
     summary_value = cast(Optional[UsageSummary], data.get("summary"))
-    summary: UsageSummary = summary_value if summary_value is not None else _EMPTY_SUMMARY
+    summary: UsageSummary = (
+        summary_value if summary_value is not None else _EMPTY_SUMMARY
+    )
     by_group_value = cast(Optional[Sequence[UsageGroup]], data.get("by_group"))
-    by_group: Sequence[UsageGroup] = by_group_value if by_group_value is not None else _EMPTY_GROUPS
+    by_group: Sequence[UsageGroup] = (
+        by_group_value if by_group_value is not None else _EMPTY_GROUPS
+    )
     daily_value = cast(Optional[Sequence[UsageDaily]], data.get("daily"))
-    daily: Sequence[UsageDaily] = daily_value if daily_value is not None else _EMPTY_DAILY
+    daily: Sequence[UsageDaily] = (
+        daily_value if daily_value is not None else _EMPTY_DAILY
+    )
 
     print("=== Invoice month total ===")
     print(f"characters: {summary['characters']}")
@@ -252,6 +276,7 @@ def main():
     """CLI entry point for ad-hoc inspection."""
     data = fetch_tts_usage()
     print_usage_report(data)
+
 
 if __name__ == "__main__":
     main()

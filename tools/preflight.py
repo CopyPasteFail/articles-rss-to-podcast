@@ -81,16 +81,24 @@ def format_preflight_json(
     """Serialize a stable JSON payload for automation tooling."""
 
     summary = {
-        "PASS": sum(1 for check_result in check_results if check_result.status == "PASS"),
-        "MISSING": sum(1 for check_result in check_results if check_result.status == "MISSING"),
+        "PASS": sum(
+            1 for check_result in check_results if check_result.status == "PASS"
+        ),
+        "MISSING": sum(
+            1 for check_result in check_results if check_result.status == "MISSING"
+        ),
         "MISCONFIGURED": sum(
-            1 for check_result in check_results if check_result.status == "MISCONFIGURED"
+            1
+            for check_result in check_results
+            if check_result.status == "MISCONFIGURED"
         ),
     }
     payload = {
         "mode": mode,
         "pipeline_id": pipeline_config.pipeline_id,
-        "config_path": pipeline_config.config_path.relative_to(pipeline_config.repo_root).as_posix(),
+        "config_path": pipeline_config.config_path.relative_to(
+            pipeline_config.repo_root
+        ).as_posix(),
         "summary": summary,
         "exit_code": summarize_exit_code(check_results),
         "checks": [asdict(check_result) for check_result in check_results],
@@ -188,7 +196,9 @@ def _run_local_preflight(pipeline_config: PipelineConfig) -> list[CheckResult]:
     required_local_env_names = list(pipeline_config.required_local_env_names)
     for env_name in required_local_env_names:
         if env_name == "CF_KV_NAMESPACE_ID":
-            resolved_namespace_id = resolve_cloudflare_kv_namespace_id(env_values=env_values)
+            resolved_namespace_id = resolve_cloudflare_kv_namespace_id(
+                env_values=env_values
+            )
             if resolved_namespace_id:
                 check_results.append(
                     CheckResult(
@@ -217,11 +227,15 @@ def _run_local_preflight(pipeline_config: PipelineConfig) -> list[CheckResult]:
                 )
             )
 
-    google_credentials_path = (env_values.get("GOOGLE_APPLICATION_CREDENTIALS") or "").strip()
+    google_credentials_path = (
+        env_values.get("GOOGLE_APPLICATION_CREDENTIALS") or ""
+    ).strip()
     if google_credentials_path:
         resolved_credentials_path = pathlib.Path(google_credentials_path)
         if not resolved_credentials_path.is_absolute():
-            resolved_credentials_path = (repo_root / resolved_credentials_path).resolve()
+            resolved_credentials_path = (
+                repo_root / resolved_credentials_path
+            ).resolve()
         check_results.append(
             _path_exists_check(
                 name="Google credentials file",
@@ -257,7 +271,9 @@ def _run_github_preflight(pipeline_config: PipelineConfig) -> list[CheckResult]:
     )
 
     if command_exists("gh"):
-        check_results.append(CheckResult(name="gh CLI", status="PASS", detail="gh is available on PATH."))
+        check_results.append(
+            CheckResult(name="gh CLI", status="PASS", detail="gh is available on PATH.")
+        )
     else:
         check_results.append(
             CheckResult(
@@ -300,7 +316,9 @@ def _run_github_preflight(pipeline_config: PipelineConfig) -> list[CheckResult]:
     check_results.append(_gcloud_check())
     check_results.append(_gcloud_auth_check(repo_root))
     check_results.append(_gcloud_project_check(repo_root, pipeline_config))
-    check_results.extend(_gcp_resource_checks(repo_root, pipeline_config, repo_context.repository))
+    check_results.extend(
+        _gcp_resource_checks(repo_root, pipeline_config, repo_context.repository)
+    )
     check_results.append(_repository_variable_check(repo_root, pipeline_config))
     check_results.append(_environment_variable_check(repo_root, pipeline_config))
     check_results.append(_environment_secret_check(repo_root, pipeline_config))
@@ -428,7 +446,9 @@ def _gcloud_check() -> CheckResult:
     """Verify that the Google Cloud CLI is available."""
 
     if command_exists("gcloud"):
-        return CheckResult(name="gcloud CLI", status="PASS", detail="gcloud is available on PATH.")
+        return CheckResult(
+            name="gcloud CLI", status="PASS", detail="gcloud is available on PATH."
+        )
     return CheckResult(
         name="gcloud CLI",
         status="MISSING",
@@ -479,7 +499,9 @@ def _gcloud_auth_check(repo_root: pathlib.Path) -> CheckResult:
     )
 
 
-def _gcloud_project_check(repo_root: pathlib.Path, pipeline_config: PipelineConfig) -> CheckResult:
+def _gcloud_project_check(
+    repo_root: pathlib.Path, pipeline_config: PipelineConfig
+) -> CheckResult:
     """Verify the active gcloud project matches the selected pipeline config."""
 
     if not pipeline_config.google.project_id:
@@ -592,7 +614,9 @@ def _gcp_resource_checks(
             ),
         )
     )
-    resource_checks.append(_pipeline_service_account_roles_check(repo_root, pipeline_config))
+    resource_checks.append(
+        _pipeline_service_account_roles_check(repo_root, pipeline_config)
+    )
     resource_checks.append(
         _pipeline_workload_identity_binding_check(
             repo_root=repo_root,
@@ -673,14 +697,25 @@ def _environment_variable_check(
     environment_name = pipeline_config.github.environment_name
     try:
         variable_names_text = run_command(
-            ["gh", "variable", "list", "--env", environment_name, "--json", "name", "--jq", ".[].name"],
+            [
+                "gh",
+                "variable",
+                "list",
+                "--env",
+                environment_name,
+                "--json",
+                "name",
+                "--jq",
+                ".[].name",
+            ],
             cwd=repo_root,
         )
     except CommandExecutionError as exc:
         return CheckResult(
             name="GitHub environment variables",
             status="MISCONFIGURED",
-            detail=exc.output or f"Failed to read variables for environment '{environment_name}'.",
+            detail=exc.output
+            or f"Failed to read variables for environment '{environment_name}'.",
             next_action=f"Create the GitHub environment '{environment_name}' and add its variables.",
         )
 
@@ -728,14 +763,25 @@ def _environment_secret_check(
     environment_name = pipeline_config.github.environment_name
     try:
         secret_names_text = run_command(
-            ["gh", "secret", "list", "--env", environment_name, "--json", "name", "--jq", ".[].name"],
+            [
+                "gh",
+                "secret",
+                "list",
+                "--env",
+                environment_name,
+                "--json",
+                "name",
+                "--jq",
+                ".[].name",
+            ],
             cwd=repo_root,
         )
     except CommandExecutionError as exc:
         return CheckResult(
             name="GitHub environment secrets",
             status="MISCONFIGURED",
-            detail=exc.output or f"Failed to read secrets for environment '{environment_name}'.",
+            detail=exc.output
+            or f"Failed to read secrets for environment '{environment_name}'.",
             next_action=(
                 f"Create the GitHub environment '{environment_name}', then run "
                 f"`scripts/push-gh-secrets.sh --pipeline {pipeline_config.pipeline_id}`."
@@ -778,7 +824,9 @@ def _workflow_target_path_check(
     """Validate that the configured workflow path is safe and writable."""
 
     try:
-        workflow_path = ensure_repo_relative_path(repo_root, pipeline_config.github.workflow_file)
+        workflow_path = ensure_repo_relative_path(
+            repo_root, pipeline_config.github.workflow_file
+        )
     except ValueError as exc:
         return CheckResult(
             name="Workflow file target",
@@ -809,13 +857,17 @@ def _provider_configuration_check(
             next_action="Fix the GitHub remote and rerun preflight.",
         )
 
-    repository_numeric_id = resolve_repository_numeric_id(repo_root, repository_name_with_owner)
+    repository_numeric_id = resolve_repository_numeric_id(
+        repo_root, repository_name_with_owner
+    )
     expected_provider_configuration = get_expected_provider_configuration(
         repository_name_with_owner=repository_name_with_owner,
         repository_numeric_id=repository_numeric_id,
     )
     try:
-        current_provider_configuration = describe_provider_configuration(pipeline_config)
+        current_provider_configuration = describe_provider_configuration(
+            pipeline_config
+        )
     except CommandExecutionError as exc:
         return CheckResult(
             name="Workload Identity Provider configuration",
@@ -1008,13 +1060,20 @@ def _pipeline_workload_identity_binding_check(
 
     same_pool_members: list[str] = []
     for binding in service_account_policy.get("bindings", []):
-        if not isinstance(binding, dict) or binding.get("role") != "roles/iam.workloadIdentityUser":
+        if (
+            not isinstance(binding, dict)
+            or binding.get("role") != "roles/iam.workloadIdentityUser"
+        ):
             continue
         members = binding.get("members")
         if not isinstance(members, list):
             continue
         for member in members:
-            if isinstance(member, str) and f"/workloadIdentityPools/{google_config.workload_identity_pool_id}/" in member:
+            if (
+                isinstance(member, str)
+                and f"/workloadIdentityPools/{google_config.workload_identity_pool_id}/"
+                in member
+            ):
                 same_pool_members.append(member)
 
     if expected_member not in same_pool_members:
@@ -1027,7 +1086,9 @@ def _pipeline_workload_identity_binding_check(
                 f"{pipeline_config.pipeline_id}`."
             ),
         )
-    broader_members = sorted(member for member in same_pool_members if member != expected_member)
+    broader_members = sorted(
+        member for member in same_pool_members if member != expected_member
+    )
     if broader_members:
         return CheckResult(
             name="Pipeline Workload Identity binding",
@@ -1108,7 +1169,11 @@ def _gcloud_describe_check(
     try:
         run_command(command, cwd=repo_root)
     except CommandExecutionError as exc:
-        if "NOT_FOUND" in exc.output or "was not found" in exc.output or "does not exist" in exc.output:
+        if (
+            "NOT_FOUND" in exc.output
+            or "was not found" in exc.output
+            or "does not exist" in exc.output
+        ):
             return CheckResult(
                 name=name,
                 status="MISSING",
@@ -1146,7 +1211,9 @@ def _path_exists_check(
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point for local and GitHub preflight validation."""
 
-    parser = argparse.ArgumentParser(description="Run local or GitHub preflight checks.")
+    parser = argparse.ArgumentParser(
+        description="Run local or GitHub preflight checks."
+    )
     parser.add_argument("mode", choices=["local", "github"])
     parser.add_argument("--pipeline", help="Pipeline id under pipelines/<id>.yaml.")
     parser.add_argument("--config", help="Explicit pipeline config path.")
@@ -1166,7 +1233,9 @@ def main(argv: list[str] | None = None) -> int:
         )
     except (RuntimeError, PipelineConfigError) as exc:
         if args.json:
-            print(json.dumps({"error": str(exc), "exit_code": EXIT_USAGE_ERROR}, indent=2))
+            print(
+                json.dumps({"error": str(exc), "exit_code": EXIT_USAGE_ERROR}, indent=2)
+            )
         else:
             print(f"Preflight failed before checks could start: {exc}")
         return EXIT_USAGE_ERROR

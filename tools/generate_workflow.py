@@ -7,7 +7,11 @@ import pathlib
 import sys
 
 from tools.command_utils import detect_repo_context, ensure_repo_relative_path
-from tools.pipeline_config import PipelineConfig, load_pipeline_config, render_schedule_cron_entries
+from tools.pipeline_config import (
+    PipelineConfig,
+    load_pipeline_config,
+    render_schedule_cron_entries,
+)
 
 
 def generate_workflow_yaml(pipeline_config: PipelineConfig) -> str:
@@ -25,7 +29,7 @@ def generate_workflow_yaml(pipeline_config: PipelineConfig) -> str:
             *[
                 (
                     f"    - cron: '{schedule_entry['cron']}'\n"
-                    f"      timezone: \"{schedule_entry['timezone']}\""
+                    f'      timezone: "{schedule_entry["timezone"]}"'
                 )
                 for schedule_entry in schedule_entries
             ],

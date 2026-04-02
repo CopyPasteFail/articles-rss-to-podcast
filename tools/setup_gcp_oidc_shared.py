@@ -159,9 +159,17 @@ def diff_provider_configuration(
             f"(current={current_issuer_uri}, "
             f"expected={expected_provider_configuration['issuerUri']})"
         )
-    if current_provider_configuration.get("attributeMapping") != expected_provider_configuration["attributeMapping"]:
-        drift_messages.append("attributeMapping differs from the expected GitHub claim mapping.")
-    if current_provider_configuration.get("attributeCondition") != expected_provider_configuration["attributeCondition"]:
+    if (
+        current_provider_configuration.get("attributeMapping")
+        != expected_provider_configuration["attributeMapping"]
+    ):
+        drift_messages.append(
+            "attributeMapping differs from the expected GitHub claim mapping."
+        )
+    if (
+        current_provider_configuration.get("attributeCondition")
+        != expected_provider_configuration["attributeCondition"]
+    ):
         drift_messages.append(
             "attributeCondition differs "
             f"(current={current_provider_configuration.get('attributeCondition')}, "
@@ -235,8 +243,7 @@ def ensure_shared_oidc_resources(
             cwd=pipeline_config.repo_root,
         )
         print(
-            "CREATED: Workload Identity Pool "
-            f"{google_config.workload_identity_pool_id}"
+            f"CREATED: Workload Identity Pool {google_config.workload_identity_pool_id}"
         )
 
     current_provider_configuration = describe_provider_configuration(pipeline_config)
@@ -288,13 +295,17 @@ def ensure_shared_oidc_resources(
 
     reconciled_provider_configuration = describe_provider_configuration(pipeline_config)
     if reconciled_provider_configuration is None:
-        raise RuntimeError("Provider update completed but the provider can no longer be described.")
+        raise RuntimeError(
+            "Provider update completed but the provider can no longer be described."
+        )
     remaining_drift_messages = diff_provider_configuration(
         current_provider_configuration=reconciled_provider_configuration,
         expected_provider_configuration=expected_provider_configuration,
     )
     if remaining_drift_messages:
-        remaining_drift_text = "\n".join(f"- {message}" for message in remaining_drift_messages)
+        remaining_drift_text = "\n".join(
+            f"- {message}" for message in remaining_drift_messages
+        )
         raise RuntimeError(
             "Provider update completed but drift remains according to a fresh describe:\n"
             f"{remaining_drift_text}"
@@ -336,7 +347,9 @@ def main(argv: list[str] | None = None) -> int:
         repo_context.repository,
     )
     if repository_numeric_id:
-        print(f"Using GitHub repository id {repository_numeric_id} for provider restriction.")
+        print(
+            f"Using GitHub repository id {repository_numeric_id} for provider restriction."
+        )
     else:
         print(
             "GitHub repository id could not be resolved; falling back to repository name "
@@ -354,8 +367,7 @@ def main(argv: list[str] | None = None) -> int:
         repository_numeric_id,
     )
     print(
-        "Shared Google OIDC setup complete for repository "
-        f"{repo_context.repository}."
+        f"Shared Google OIDC setup complete for repository {repo_context.repository}."
     )
     return 0
 

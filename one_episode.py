@@ -168,7 +168,10 @@ def _read_rss_payload_for_debug(
         try:
             response = http_get(
                 rss_url,
-                timeout=(RSS_DEBUG_HTTP_CONNECT_TIMEOUT_S, RSS_DEBUG_HTTP_READ_TIMEOUT_S),
+                timeout=(
+                    RSS_DEBUG_HTTP_CONNECT_TIMEOUT_S,
+                    RSS_DEBUG_HTTP_READ_TIMEOUT_S,
+                ),
             )
             response.raise_for_status()
             return response.content
@@ -180,7 +183,9 @@ def _read_rss_payload_for_debug(
     return None
 
 
-def _log_feedparser_diagnostics(parsed: feedparser.FeedParserDict, *, entries_count: int) -> None:
+def _log_feedparser_diagnostics(
+    parsed: feedparser.FeedParserDict, *, entries_count: int
+) -> None:
     """Log feedparser diagnostics to help explain why a feed produced zero entries.
 
     Inputs: parsed feedparser result and entries_count from that parse.
@@ -227,6 +232,7 @@ def _dump_rss_debug(rss_url: str) -> None:
     if _looks_like_html(payload_text):
         print("RSS debug: payload looks like HTML, not RSS")
 
+
 def slugify(url_or_title: str) -> str:
     """Turn a link or title into a short filesystem-friendly slug for the MP3 name."""
     base = url_or_title.strip()
@@ -246,12 +252,20 @@ def feed_entry_to_meta(e: object, *, allow_fetch: bool = False) -> EntryMeta:
         author = _ensure_str(getattr(e, "creator", None))
     tstruct = getattr(e, "published_parsed", None) or getattr(e, "updated_parsed", None)
     if tstruct:
-        pub_utc = datetime.datetime(*tstruct[:6], tzinfo=datetime.timezone.utc).isoformat()
+        pub_utc = datetime.datetime(
+            *tstruct[:6], tzinfo=datetime.timezone.utc
+        ).isoformat()
     else:
         pub_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    plain_text, html_content, subtitle, lead_image = resolve_article_content(e, link, allow_fetch=allow_fetch)
+    plain_text, html_content, subtitle, lead_image = resolve_article_content(
+        e, link, allow_fetch=allow_fetch
+    )
     if not plain_text:
-        plain_text = _ensure_str(getattr(e, "summary", None)) or _ensure_str(getattr(e, "description", None)) or title
+        plain_text = (
+            _ensure_str(getattr(e, "summary", None))
+            or _ensure_str(getattr(e, "description", None))
+            or title
+        )
     if not html_content and plain_text:
         html_content = text_to_html(plain_text)
     if not subtitle:
@@ -390,7 +404,9 @@ def render_ssml(meta: EntryMeta) -> tuple[list[str], int]:
                         else:
                             chunk_only = _mk_segment(title, [chunk], include_title)
                             if len(chunk_only.encode("utf-8")) > MAX_SSML_BYTES:
-                                raise SystemExit("Paragraph chunk still exceeds SSML limit; consider reducing MAX_PARAGRAPH_CHARS")
+                                raise SystemExit(
+                                    "Paragraph chunk still exceeds SSML limit; consider reducing MAX_PARAGRAPH_CHARS"
+                                )
                             flush_current([chunk], include_title)
                             include_title = False
                             buffer = []
@@ -414,6 +430,7 @@ def render_ssml(meta: EntryMeta) -> tuple[list[str], int]:
 
     return segments, char_count
 
+
 def synthesize_ssml(ssml_segments: Sequence[str], out_path: pathlib.Path) -> None:
     """Send the SSML segments to Google, stitch the MP3s, and write the output for downstream steps."""
     client: _TTSClient = texttospeech.TextToSpeechClient()
@@ -428,10 +445,7 @@ def synthesize_ssml(ssml_segments: Sequence[str], out_path: pathlib.Path) -> Non
         else:
             lang = "en-US"
 
-    voice = texttospeech.VoiceSelectionParams(
-        name=name,
-        language_code=lang
-    )
+    voice = texttospeech.VoiceSelectionParams(name=name, language_code=lang)
     audio_config = texttospeech.AudioConfig(
         audio_encoding=texttospeech.AudioEncoding.MP3,
         speaking_rate=RATE,
@@ -440,10 +454,16 @@ def synthesize_ssml(ssml_segments: Sequence[str], out_path: pathlib.Path) -> Non
     combined_audio: AudioSegment | None = None
     for idx, ssml in enumerate(ssml_segments):
         input_ssml = texttospeech.SynthesisInput(ssml=ssml)
-        resp = client.synthesize_speech(input=input_ssml, voice=voice, audio_config=audio_config)
-        segment_audio = AudioSegment.from_file(io.BytesIO(resp.audio_content), format="mp3")
-        combined_audio = segment_audio if combined_audio is None else combined_audio + segment_audio
-        print(f"Segment {idx+1}/{len(ssml_segments)} bytes={len(resp.audio_content)}")
+        resp = client.synthesize_speech(
+            input=input_ssml, voice=voice, audio_config=audio_config
+        )
+        segment_audio = AudioSegment.from_file(
+            io.BytesIO(resp.audio_content), format="mp3"
+        )
+        combined_audio = (
+            segment_audio if combined_audio is None else combined_audio + segment_audio
+        )
+        print(f"Segment {idx + 1}/{len(ssml_segments)} bytes={len(resp.audio_content)}")
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if combined_audio is None:
@@ -451,11 +471,13 @@ def synthesize_ssml(ssml_segments: Sequence[str], out_path: pathlib.Path) -> Non
     combined_audio.export(out_path, format="mp3")
     print(f"Voice: {name}  Lang: {lang}")
 
+
 def normalize_mp3(path: pathlib.Path) -> None:
     """Run loudness normalization right after synthesis so the finished MP3 sounds consistent."""
     audio = AudioSegment.from_file(path)
     audio = effects.normalize(audio)
     audio.export(path, format="mp3")
+
 
 def main() -> None:
     """Drive the whole flow: select an article, render SSML, build MP3 + sidecar."""
@@ -465,7 +487,9 @@ def main() -> None:
     print(f"RSS source (RSS_URL): {_describe_rss_source(RSS_URL)}")
     e = select_entry()
     # filename: <YYYYMMDD-HHMMSS>-<slug(title or path)>
-    dt = datetime.datetime.fromisoformat(e["pub_utc"].replace("Z","+00:00")).astimezone(datetime.timezone.utc)
+    dt = datetime.datetime.fromisoformat(
+        e["pub_utc"].replace("Z", "+00:00")
+    ).astimezone(datetime.timezone.utc)
     ts = dt.strftime("%Y%m%d-%H%M%S")
     slug = slugify(e["link"] or e["title"])
     mp3_name = f"{ts}-{slug}.mp3"
@@ -502,6 +526,7 @@ def main() -> None:
     with sidecar.open("w", encoding="utf-8") as f:
         json.dump(side, f, ensure_ascii=False, indent=2)
     print(f"Sidecar: {sidecar}")
+
 
 if __name__ == "__main__":
     main()

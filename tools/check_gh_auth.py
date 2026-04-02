@@ -5,7 +5,12 @@ from __future__ import annotations
 import argparse
 import sys
 
-from tools.command_utils import CommandExecutionError, command_exists, detect_repo_context, run_command
+from tools.command_utils import (
+    CommandExecutionError,
+    command_exists,
+    detect_repo_context,
+    run_command,
+)
 
 
 def check_github_cli_authentication() -> tuple[bool, list[str]]:
@@ -20,18 +25,26 @@ def check_github_cli_authentication() -> tuple[bool, list[str]]:
 
     if not command_exists("gh"):
         status_lines.append("MISSING: gh CLI is not installed or not on PATH.")
-        status_lines.append("Next action: install GitHub CLI, then run `gh auth login`.")
+        status_lines.append(
+            "Next action: install GitHub CLI, then run `gh auth login`."
+        )
         return False, status_lines
 
     try:
         repo_context = detect_repo_context()
     except RuntimeError as exc:
         status_lines.append(f"MISCONFIGURED: {exc}")
-        status_lines.append("Next action: run this command from inside the repository checkout.")
+        status_lines.append(
+            "Next action: run this command from inside the repository checkout."
+        )
         return False, status_lines
     if repo_context.repository is None:
-        status_lines.append("MISCONFIGURED: Could not resolve a GitHub repository from this checkout.")
-        status_lines.append("Next action: verify the `origin` remote points to a GitHub repository.")
+        status_lines.append(
+            "MISCONFIGURED: Could not resolve a GitHub repository from this checkout."
+        )
+        status_lines.append(
+            "Next action: verify the `origin` remote points to a GitHub repository."
+        )
         return False, status_lines
 
     try:
@@ -43,7 +56,9 @@ def check_github_cli_authentication() -> tuple[bool, list[str]]:
         status_lines.append("Next action: run `gh auth login`.")
         return False, status_lines
 
-    status_lines.append(f"PASS: gh auth is active for repository {repo_context.repository}.")
+    status_lines.append(
+        f"PASS: gh auth is active for repository {repo_context.repository}."
+    )
     return True, status_lines
 
 

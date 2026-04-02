@@ -71,7 +71,9 @@ def remove_unexpected_project_roles(
     """Remove broader project-level roles from the dedicated pipeline service account."""
 
     google_config = pipeline_config.google
-    current_roles = get_project_roles_for_service_account(pipeline_config=pipeline_config)
+    current_roles = get_project_roles_for_service_account(
+        pipeline_config=pipeline_config
+    )
     unexpected_roles = sorted(current_roles - expected_roles)
     for role_name in unexpected_roles:
         run_command(
@@ -139,7 +141,10 @@ def remove_unexpected_workload_identity_members(
         f"{google_config.workload_identity_pool_id}/"
     )
     for binding in service_account_policy.get("bindings", []):
-        if not isinstance(binding, dict) or binding.get("role") != "roles/iam.workloadIdentityUser":
+        if (
+            not isinstance(binding, dict)
+            or binding.get("role") != "roles/iam.workloadIdentityUser"
+        ):
             continue
         members = binding.get("members")
         if not isinstance(members, list):
@@ -149,7 +154,9 @@ def remove_unexpected_workload_identity_members(
                 continue
             if member == expected_member:
                 continue
-            if member.startswith(pool_principal_prefix) or member.startswith(pool_principal_set_prefix):
+            if member.startswith(pool_principal_prefix) or member.startswith(
+                pool_principal_set_prefix
+            ):
                 run_command(
                     [
                         "gcloud",

@@ -1,9 +1,7 @@
 from typing import Any
 
-
 class FeedParserDict(dict[str, Any]):
     entries: list[Any]
-
 
 def parse(
     url_file_stream_or_string: Any,

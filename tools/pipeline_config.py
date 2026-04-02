@@ -216,7 +216,9 @@ def load_pipeline_config(
     Edge cases: applies optional local-only overrides from `*.local.yaml` files.
     """
 
-    resolved_config_path = _resolve_config_path(repo_root, pipeline_id=pipeline_id, config_path=config_path)
+    resolved_config_path = _resolve_config_path(
+        repo_root, pipeline_id=pipeline_id, config_path=config_path
+    )
     raw_config = _read_config_document(resolved_config_path)
     local_pipeline_override = _load_local_overlay_for_config_path(resolved_config_path)
     shared_config = _load_shared_pipeline_config(repo_root)
@@ -265,7 +267,9 @@ def render_schedule_cron_entries(schedule: ScheduleConfig) -> list[dict[str, str
         current_minutes += interval_minutes
 
     if not run_times:
-        raise PipelineConfigError("Schedule window does not produce any workflow run times.")
+        raise PipelineConfigError(
+            "Schedule window does not produce any workflow run times."
+        )
 
     grouped_hours_by_minute: dict[int, list[int]] = {}
     for hour_of_day, minute_of_hour in run_times:
@@ -275,7 +279,9 @@ def render_schedule_cron_entries(schedule: ScheduleConfig) -> list[dict[str, str
 
     cron_entries: list[dict[str, str]] = []
     for minute_of_hour in sorted(grouped_hours_by_minute):
-        hours = ",".join(str(hour) for hour in sorted(grouped_hours_by_minute[minute_of_hour]))
+        hours = ",".join(
+            str(hour) for hour in sorted(grouped_hours_by_minute[minute_of_hour])
+        )
         cron_entries.append(
             {
                 "cron": f"{minute_of_hour} {hours} * * *",
@@ -321,7 +327,9 @@ def _resolve_config_path(
         if not resolved_path.is_absolute():
             resolved_path = (repo_root / resolved_path).resolve()
         if not resolved_path.exists():
-            raise PipelineConfigError(f"Pipeline config does not exist: {resolved_path}")
+            raise PipelineConfigError(
+                f"Pipeline config does not exist: {resolved_path}"
+            )
         return resolved_path
 
     if not pipeline_id:
@@ -331,14 +339,20 @@ def _resolve_config_path(
         repo_root / "pipelines" / f"{pipeline_id}{suffix}"
         for suffix in CONFIG_SEARCH_SUFFIXES
     ]
-    existing_paths = [candidate_path for candidate_path in candidate_paths if candidate_path.exists()]
+    existing_paths = [
+        candidate_path for candidate_path in candidate_paths if candidate_path.exists()
+    ]
     if not existing_paths:
-        expected_paths = ", ".join(str(path.relative_to(repo_root)) for path in candidate_paths)
+        expected_paths = ", ".join(
+            str(path.relative_to(repo_root)) for path in candidate_paths
+        )
         raise PipelineConfigError(
             f"No pipeline config found for '{pipeline_id}'. Checked: {expected_paths}"
         )
     if len(existing_paths) > 1:
-        matched_paths = ", ".join(str(path.relative_to(repo_root)) for path in existing_paths)
+        matched_paths = ", ".join(
+            str(path.relative_to(repo_root)) for path in existing_paths
+        )
         raise PipelineConfigError(
             f"Multiple config files match pipeline '{pipeline_id}'. Remove the ambiguity: {matched_paths}"
         )
@@ -365,7 +379,9 @@ def _read_config_document(config_path: pathlib.Path) -> dict[str, object]:
     return parsed_document
 
 
-def _load_local_overlay_for_config_path(config_path: pathlib.Path) -> dict[str, object] | None:
+def _load_local_overlay_for_config_path(
+    config_path: pathlib.Path,
+) -> dict[str, object] | None:
     """Load the optional `*.local.*` overlay that belongs to one base config file."""
 
     base_name = config_path.stem
@@ -376,7 +392,9 @@ def _load_local_overlay_for_config_path(config_path: pathlib.Path) -> dict[str, 
         config_path.with_name(f"{base_name}{LOCAL_CONFIG_SUFFIX}{suffix}")
         for suffix in CONFIG_SEARCH_SUFFIXES
     ]
-    existing_paths = [candidate_path for candidate_path in candidate_paths if candidate_path.exists()]
+    existing_paths = [
+        candidate_path for candidate_path in candidate_paths if candidate_path.exists()
+    ]
     if not existing_paths:
         return None
     if len(existing_paths) > 1:
@@ -400,11 +418,15 @@ def _load_shared_pipeline_config(repo_root: pathlib.Path) -> dict[str, object] |
         repo_root / "pipelines" / f"{SHARED_PIPELINE_CONFIG_BASENAME}{suffix}"
         for suffix in CONFIG_SEARCH_SUFFIXES
     ]
-    existing_paths = [candidate_path for candidate_path in candidate_paths if candidate_path.exists()]
+    existing_paths = [
+        candidate_path for candidate_path in candidate_paths if candidate_path.exists()
+    ]
     if not existing_paths:
         return None
     if len(existing_paths) > 1:
-        matched_paths = ", ".join(str(path.relative_to(repo_root)) for path in existing_paths)
+        matched_paths = ", ".join(
+            str(path.relative_to(repo_root)) for path in existing_paths
+        )
         raise PipelineConfigError(
             "Multiple shared pipeline config files match the supported names. "
             f"Remove the ambiguity: {matched_paths}"
@@ -435,12 +457,16 @@ def _merge_pipeline_with_shared_google_config(
         if field_name in shared_google_config:
             merged_google_config[field_name] = shared_google_config[field_name]
     if pipeline_google_config is not None:
-        merged_google_config = _merge_mapping_documents(merged_google_config, pipeline_google_config)
+        merged_google_config = _merge_mapping_documents(
+            merged_google_config, pipeline_google_config
+        )
     merged_config["google"] = merged_google_config
     return merged_config
 
 
-def _read_shared_google_mapping(shared_config: dict[str, object] | None) -> dict[str, object]:
+def _read_shared_google_mapping(
+    shared_config: dict[str, object] | None,
+) -> dict[str, object]:
     """Extract the shared Google mapping from the optional shared config document."""
 
     if shared_config is None:
@@ -466,7 +492,9 @@ def _merge_mapping_documents(
     for key, override_value in override_mapping.items():
         existing_value = merged_mapping.get(key)
         if isinstance(existing_value, dict) and isinstance(override_value, dict):
-            merged_mapping[key] = _merge_mapping_documents(existing_value, override_value)
+            merged_mapping[key] = _merge_mapping_documents(
+                existing_value, override_value
+            )
         else:
             merged_mapping[key] = override_value
     return merged_mapping
@@ -523,7 +551,9 @@ def _validate_schedule_config(raw_schedule: dict[str, object]) -> ScheduleConfig
     try:
         ZoneInfo(timezone)
     except Exception as exc:
-        raise PipelineConfigError(f"Invalid schedule.timezone '{timezone}': {exc}") from exc
+        raise PipelineConfigError(
+            f"Invalid schedule.timezone '{timezone}': {exc}"
+        ) from exc
 
     interval_minutes_value = _read_schedule_interval_minutes(raw_schedule)
 
@@ -562,15 +592,21 @@ def _validate_github_config(
     workflow_path = ensure_repo_relative_path(repo_root, workflow_file)
     workflow_path_string = workflow_path.relative_to(repo_root).as_posix()
     if not workflow_path_string.startswith(".github/workflows/"):
-        raise PipelineConfigError("github.workflow_file must live under .github/workflows/.")
+        raise PipelineConfigError(
+            "github.workflow_file must live under .github/workflows/."
+        )
     if workflow_path.suffix.lower() not in {".yml", ".yaml"}:
-        raise PipelineConfigError("github.workflow_file must use a .yml or .yaml extension.")
+        raise PipelineConfigError(
+            "github.workflow_file must use a .yml or .yaml extension."
+        )
 
     environment_name = _read_optional_string(raw_github, "environment")
     if environment_name is None:
         environment_name = pipeline_id
     if not environment_name.strip():
-        raise PipelineConfigError("github.environment must be a non-empty string when provided.")
+        raise PipelineConfigError(
+            "github.environment must be a non-empty string when provided."
+        )
 
     return GitHubConfig(
         workflow_file=workflow_path_string,
@@ -591,11 +627,15 @@ def _read_schedule_interval_minutes(raw_schedule: dict[str, object]) -> int:
         )
     if raw_interval_minutes is not None:
         if not isinstance(raw_interval_minutes, int) or raw_interval_minutes <= 0:
-            raise PipelineConfigError("schedule.interval_minutes must be a positive integer.")
+            raise PipelineConfigError(
+                "schedule.interval_minutes must be a positive integer."
+            )
         return raw_interval_minutes
     if raw_interval_hours is not None:
         if not isinstance(raw_interval_hours, int) or raw_interval_hours <= 0:
-            raise PipelineConfigError("schedule.interval_hours must be a positive integer.")
+            raise PipelineConfigError(
+                "schedule.interval_hours must be a positive integer."
+            )
         return raw_interval_hours * 60
     raise PipelineConfigError(
         "One of schedule.interval_hours or schedule.interval_minutes is required."
@@ -610,8 +650,12 @@ def _validate_google_config(
 
     project_id = _read_optional_string(raw_google, "project_id")
     project_number = _read_optional_string(raw_google, "project_number")
-    workload_identity_pool_id = _read_optional_string(raw_google, "workload_identity_pool_id")
-    workload_identity_provider_id = _read_optional_string(raw_google, "workload_identity_provider_id")
+    workload_identity_pool_id = _read_optional_string(
+        raw_google, "workload_identity_pool_id"
+    )
+    workload_identity_provider_id = _read_optional_string(
+        raw_google, "workload_identity_provider_id"
+    )
     service_account_id = _read_optional_string(raw_google, "service_account_id")
 
     if project_number is not None and not project_number.isdigit():
@@ -630,7 +674,9 @@ def _validate_google_config(
             "workload_identity_provider_id."
         )
 
-    raw_service_account_email = _read_optional_string(raw_google, "service_account_email")
+    raw_service_account_email = _read_optional_string(
+        raw_google, "service_account_email"
+    )
     if raw_service_account_email is not None:
         raise PipelineConfigError(
             "google.service_account_email is no longer allowed in tracked config. "
@@ -666,7 +712,9 @@ def _validate_google_config(
     )
 
 
-def _validate_failure_email_config(raw_failure_email: object) -> FailureEmailConfig | None:
+def _validate_failure_email_config(
+    raw_failure_email: object,
+) -> FailureEmailConfig | None:
     """Validate the optional failure email block when one is configured."""
 
     if raw_failure_email is None:
@@ -677,14 +725,20 @@ def _validate_failure_email_config(raw_failure_email: object) -> FailureEmailCon
     transport = _read_required_string(raw_failure_email, "transport")
     recipients = tuple(_read_required_string_list(raw_failure_email, "recipients"))
     if not recipients:
-        raise PipelineConfigError("failure_email.recipients must contain at least one email.")
+        raise PipelineConfigError(
+            "failure_email.recipients must contain at least one email."
+        )
     subject_prefix = _read_required_string(raw_failure_email, "subject_prefix")
 
     raw_secret_names = _read_optional_mapping(raw_failure_email, "secret_names") or {}
     smtp_host_secret_name = _read_secret_name_override(raw_secret_names, "smtp_host")
     smtp_port_secret_name = _read_secret_name_override(raw_secret_names, "smtp_port")
-    smtp_username_secret_name = _read_secret_name_override(raw_secret_names, "smtp_username")
-    smtp_password_secret_name = _read_secret_name_override(raw_secret_names, "smtp_password")
+    smtp_username_secret_name = _read_secret_name_override(
+        raw_secret_names, "smtp_username"
+    )
+    smtp_password_secret_name = _read_secret_name_override(
+        raw_secret_names, "smtp_password"
+    )
     smtp_from_secret_name = _read_secret_name_override(raw_secret_names, "smtp_from")
 
     return FailureEmailConfig(
@@ -699,7 +753,9 @@ def _validate_failure_email_config(raw_failure_email: object) -> FailureEmailCon
     )
 
 
-def _read_secret_name_override(raw_secret_names: dict[str, object], field_name: str) -> str:
+def _read_secret_name_override(
+    raw_secret_names: dict[str, object], field_name: str
+) -> str:
     """Read one optional secret name override or fall back to the default env secret name."""
 
     override_value = raw_secret_names.get(field_name)
@@ -726,7 +782,9 @@ def _build_default_service_account_id(pipeline_id: str) -> str:
     return f"rss-podcast-{normalized_pipeline_id}"
 
 
-def _read_required_mapping(raw_mapping: dict[str, object], field_name: str) -> dict[str, object]:
+def _read_required_mapping(
+    raw_mapping: dict[str, object], field_name: str
+) -> dict[str, object]:
     """Read one required nested mapping field."""
 
     raw_value = raw_mapping.get(field_name)
@@ -758,18 +816,24 @@ def _read_required_string(raw_mapping: dict[str, object], field_name: str) -> st
     return raw_value.strip()
 
 
-def _read_optional_string(raw_mapping: dict[str, object], field_name: str) -> str | None:
+def _read_optional_string(
+    raw_mapping: dict[str, object], field_name: str
+) -> str | None:
     """Read one optional non-empty string field."""
 
     raw_value = raw_mapping.get(field_name)
     if raw_value is None:
         return None
     if not isinstance(raw_value, str) or not raw_value.strip():
-        raise PipelineConfigError(f"{field_name} must be a non-empty string when provided.")
+        raise PipelineConfigError(
+            f"{field_name} must be a non-empty string when provided."
+        )
     return raw_value.strip()
 
 
-def _read_required_string_list(raw_mapping: dict[str, object], field_name: str) -> list[str]:
+def _read_required_string_list(
+    raw_mapping: dict[str, object], field_name: str
+) -> list[str]:
     """Read one required list of non-empty strings."""
 
     raw_value = raw_mapping.get(field_name)
@@ -785,14 +849,18 @@ def _read_required_string_list(raw_mapping: dict[str, object], field_name: str) 
     return cleaned_values
 
 
-def _read_optional_string_list(raw_mapping: dict[str, object], field_name: str) -> list[str]:
+def _read_optional_string_list(
+    raw_mapping: dict[str, object], field_name: str
+) -> list[str]:
     """Read one optional list of non-empty strings."""
 
     raw_value = raw_mapping.get(field_name)
     if raw_value is None:
         return []
     if not isinstance(raw_value, list):
-        raise PipelineConfigError(f"{field_name} must be a list of strings when provided.")
+        raise PipelineConfigError(
+            f"{field_name} must be a list of strings when provided."
+        )
     cleaned_values: list[str] = []
     for index, list_value in enumerate(raw_value):
         if not isinstance(list_value, str) or not list_value.strip():
@@ -816,10 +884,14 @@ def _parse_clock_minutes(clock_value: str, *, allow_end_of_day: bool) -> int:
     """Parse an `HH:MM` clock string into minutes since midnight."""
 
     if not isinstance(clock_value, str) or ":" not in clock_value:
-        raise PipelineConfigError(f"Invalid time value '{clock_value}'. Expected HH:MM.")
+        raise PipelineConfigError(
+            f"Invalid time value '{clock_value}'. Expected HH:MM."
+        )
     hour_text, minute_text = clock_value.split(":", 1)
     if not hour_text.isdigit() or not minute_text.isdigit():
-        raise PipelineConfigError(f"Invalid time value '{clock_value}'. Expected HH:MM.")
+        raise PipelineConfigError(
+            f"Invalid time value '{clock_value}'. Expected HH:MM."
+        )
 
     hour_value = int(hour_text)
     minute_value = int(minute_text)

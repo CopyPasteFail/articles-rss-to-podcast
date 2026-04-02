@@ -41,11 +41,9 @@ class ArchiveItem(Protocol):
         metadata: Mapping[str, Any],
         verbose: bool = False,
         request_kwargs: Mapping[str, Any] | None = None,
-    ) -> Sequence[UploadResponse]:
-        ...
+    ) -> Sequence[UploadResponse]: ...
 
-    def get_files(self) -> Iterable[ArchiveFile]:
-        ...
+    def get_files(self) -> Iterable[ArchiveFile]: ...
 
 
 class ArchiveSession(Protocol):
@@ -56,8 +54,7 @@ class ArchiveSession(Protocol):
         identifier: str,
         item_metadata: Mapping[str, Any] | None = None,
         request_kwargs: MutableMapping[str, Any] | None = None,
-    ) -> ArchiveItem:
-        ...
+    ) -> ArchiveItem: ...
 
 
 def get_session(
@@ -78,6 +75,7 @@ def get_session(
         ),
     )
 
+
 RETRYABLE_STATUS_CODES: set[int] = {408, 425, 429, 500, 502, 503, 504}
 
 
@@ -87,7 +85,9 @@ def should_retry(exc: requests.exceptions.RequestException) -> bool:
     status = getattr(response, "status_code", None)
     if isinstance(exc, requests.exceptions.HTTPError):
         return status in RETRYABLE_STATUS_CODES
-    return isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.Timeout))
+    return isinstance(
+        exc, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)
+    )
 
 
 def retry_delay(attempt: int, response: requests.Response | None) -> float:
@@ -213,10 +213,12 @@ def read_sidecar(mp3_path: pathlib.Path) -> dict[str, Any]:
     with open(sidecar, "r", encoding="utf-8") as f:
         return json.load(f)
 
+
 def link_id(link: str) -> str:
     """Generate deterministic IA identifiers per-article so reruns overwrite safely."""
     h = hashlib.sha1(link.encode("utf-8")).hexdigest()[:16]
     return f"tts-{IA_ID_PREFIX}-{h}"
+
 
 def get_ia_session() -> ArchiveSession:
     """Decide whether to use explicit env credentials or fall back to local config."""
@@ -228,6 +230,7 @@ def get_ia_session() -> ArchiveSession:
         return get_session(config={"s3": {"access": ak, "secret": sk}}, config_file="")
     print("Using default IA config from home dir")
     return get_session(config_file="")
+
 
 def main() -> None:
     """CLI entry point invoked by pipeline.py right before RSS regeneration."""
@@ -276,15 +279,22 @@ def main() -> None:
     print(f"{'Replacing' if replacing else 'Creating'} {remote_name} in {identifier}\n")
 
     to_upload = {remote_name: str(mp3_path)}
-    result: Sequence[UploadResponse] = upload_with_retries(item, to_upload, metadata={
-        "title": meta["article_title"],
-        "mediatype": "audio",
-        "language": "und",
-        "creator": "Automated RSS to TTS",
-        "description": "Auto-generated TTS episode",
-        "subject": "podcast;tts;articles",
-        "external-identifier": meta.get("article_link", ""),
-    }, verbose=True, max_attempts=max_attempts, request_kwargs=request_kwargs)
+    result: Sequence[UploadResponse] = upload_with_retries(
+        item,
+        to_upload,
+        metadata={
+            "title": meta["article_title"],
+            "mediatype": "audio",
+            "language": "und",
+            "creator": "Automated RSS to TTS",
+            "description": "Auto-generated TTS episode",
+            "subject": "podcast;tts;articles",
+            "external-identifier": meta.get("article_link", ""),
+        },
+        verbose=True,
+        max_attempts=max_attempts,
+        request_kwargs=request_kwargs,
+    )
 
     ok = all(getattr(r, "ok", False) for r in result)
     if not ok:
@@ -296,6 +306,7 @@ def main() -> None:
 
     url = f"https://archive.org/download/{identifier}/{remote_name}"
     print("OK:", url)
+
 
 if __name__ == "__main__":
     main()
