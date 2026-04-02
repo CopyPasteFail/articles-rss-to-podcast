@@ -13,7 +13,7 @@ content_utils_stub.resolve_article_content = lambda *args, **kwargs: ("", "", ""
 content_utils_stub.text_to_html = lambda text: text
 sys.modules.setdefault("content_utils", content_utils_stub)
 
-import pipeline
+pipeline = __import__("pipeline")
 
 
 def test_should_skip_failed_entry_only_when_retry_is_exhausted() -> None:
