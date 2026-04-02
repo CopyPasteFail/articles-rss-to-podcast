@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 import sys
+from urllib.parse import quote
 
 from tools.check_gh_auth import check_github_cli_authentication
 from tools.command_utils import (
+    CommandExecutionError,
     detect_repo_context,
     load_root_env_values,
     run_command,
@@ -31,6 +33,12 @@ def push_github_secrets(
     updated_secret_names: list[str] = []
     pending_secret_updates: list[tuple[str, str]] = []
     environment_name = pipeline_config.github.environment_name
+
+    ensure_github_environment_exists(
+        repository_name_with_owner=repo_context.repository,
+        environment_name=environment_name,
+        repo_root=repo_context.root,
+    )
 
     runtime_secret_names = ("CLOUDFLARE_API_TOKEN", "IA_ACCESS_KEY", "IA_SECRET_KEY")
     for secret_name in runtime_secret_names:
@@ -75,6 +83,38 @@ def push_github_secrets(
         updated_secret_names.append(github_secret_name)
 
     return updated_secret_names
+
+
+def ensure_github_environment_exists(
+    *,
+    repository_name_with_owner: str | None,
+    environment_name: str,
+    repo_root,
+) -> None:
+    """Fail clearly when the target GitHub environment does not exist.
+
+    Inputs: resolved repository name, environment name, and repo root path.
+    Outputs: none. Raises RuntimeError when the environment cannot be confirmed.
+    Edge cases: surfaces a setup-specific message instead of leaking raw GH CLI 404s.
+    """
+
+    if repository_name_with_owner is None:
+        raise RuntimeError(
+            "Could not resolve the GitHub repository name from this checkout."
+        )
+
+    api_path = (
+        f"repos/{repository_name_with_owner}/environments/"
+        f"{quote(environment_name, safe='')}"
+    )
+    try:
+        run_command(["gh", "api", api_path], cwd=repo_root)
+    except CommandExecutionError as exc:
+        raise RuntimeError(
+            f"GitHub environment '{environment_name}' does not exist or is not readable. "
+            "Run `scripts/setup-gh-environment.sh --pipeline "
+            f"{environment_name}` first."
+        ) from exc
 
 
 def main(argv: list[str] | None = None) -> int:

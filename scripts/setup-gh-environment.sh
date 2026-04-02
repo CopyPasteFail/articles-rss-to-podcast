@@ -30,4 +30,4 @@ if ! "$PYTHON_BIN" -c "import ${MISSING_DEPENDENCY_MODULE}" >/dev/null 2>&1; the
   exit 1
 fi
 
-exec "$PYTHON_BIN" -m tools.preflight "$@"
+exec "$PYTHON_BIN" -m tools.setup_github_environment "$@"

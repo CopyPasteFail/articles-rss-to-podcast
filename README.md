@@ -166,58 +166,59 @@ python run_feed.py <feed_slug>
 
 ### GitHub Actions mode
 
-1. Create the shared repository variables in GitHub:
-
-- `GCP_PROJECT_ID`
-- `GCP_PROJECT_NUMBER`
-- `GCP_WIF_POOL_ID`
-- `GCP_WIF_PROVIDER_ID`
-
-2. Create the pipeline GitHub environment and add:
-
-- variables: `GCP_SERVICE_ACCOUNT_EMAIL`, `CF_PAGES_PROJECT`, `CF_KV_NAMESPACE_ID`
-- secrets: `CLOUDFLARE_API_TOKEN`, `IA_ACCESS_KEY`, `IA_SECRET_KEY`
-
-3. Authenticate the operator CLIs.
+1. Authenticate the operator CLIs.
 
 ```bash
 gh auth login
 gcloud auth login
 ```
 
-4. If you want to run the local GCP setup scripts, create local-only `pipelines/shared.yaml`.
+2. If you want to run the local GCP setup scripts or the GitHub variable setup helper, create local-only `pipelines/shared.yaml`.
 
-5. Run GitHub-mode preflight.
+3. Run GitHub-mode preflight.
 
 ```bash
 python -m tools.preflight github --pipeline <pipeline-id>
 ```
 
-6. Create or reconcile the shared GCP OIDC resources.
+4. Create or reconcile the shared GCP OIDC resources.
 
 ```bash
 scripts/setup-gcp-oidc-shared.sh --pipeline <pipeline-id>
 ```
 
-7. Create or reconcile the dedicated pipeline service account.
+5. Create or reconcile the dedicated pipeline service account.
 
 ```bash
 scripts/setup-gcp-pipeline-sa.sh --pipeline <pipeline-id>
 ```
 
-8. Push the pipeline environment secrets from local `.env`.
+6. Create or reconcile the shared GitHub repository variables and the pipeline environment variables.
+
+```bash
+scripts/setup-gh-environment.sh --pipeline <pipeline-id>
+scripts/setup-gh-environment.sh --pipeline <pipeline-id> --dry-run
+```
+
+This helper uses local shared Google config plus local `.env` values to ensure:
+
+- repository variables: `GCP_PROJECT_ID`, `GCP_PROJECT_NUMBER`, `GCP_WIF_POOL_ID`, `GCP_WIF_PROVIDER_ID`
+- environment creation: `github.environment`
+- environment variables: `GCP_SERVICE_ACCOUNT_EMAIL`, `CF_PAGES_PROJECT`, `CF_KV_NAMESPACE_ID`
+
+7. Push the pipeline environment secrets from local `.env`.
 
 ```bash
 scripts/push-gh-secrets.sh --pipeline <pipeline-id>
 ```
 
-9. Generate exactly one workflow file.
+8. Generate exactly one workflow file.
 
 ```bash
 python -m tools.generate_workflow --pipeline <pipeline-id>
 ```
 
-10. Commit the pipeline config and generated workflow.
+9. Commit the pipeline config and generated workflow.
 
 ## Commands
 
@@ -250,6 +251,22 @@ Behavior:
 - uploads environment secrets to the selected GitHub environment
 - never uploads Google key material
 - prints secret names only, never secret values
+
+### GitHub variable and environment setup
+
+```bash
+scripts/setup-gh-environment.sh --pipeline geektime-he
+scripts/setup-gh-environment.sh --pipeline geektime-he --dry-run
+```
+
+Behavior:
+
+- reads local shared Google config from `pipelines/shared.yaml` or local overlays
+- reads local `.env`
+- creates or reuses the selected GitHub environment
+- sets the shared repository variables used by workflow OIDC auth
+- sets the selected pipeline environment variables
+- intentionally does not upload secrets
 
 ### Shared Google OIDC setup
 

@@ -676,7 +676,10 @@ def _repository_variable_check(
         name="GitHub repository variables",
         status="MISSING",
         detail=f"Missing repository variables: {missing_text}",
-        next_action="Add the shared Google repository variables in GitHub settings.",
+        next_action=(
+            "Run `scripts/setup-gh-environment.sh --pipeline "
+            f"{pipeline_config.pipeline_id}` to reconcile the shared GitHub variables."
+        ),
     )
 
 
@@ -716,7 +719,11 @@ def _environment_variable_check(
             status="MISCONFIGURED",
             detail=exc.output
             or f"Failed to read variables for environment '{environment_name}'.",
-            next_action=f"Create the GitHub environment '{environment_name}' and add its variables.",
+            next_action=(
+                "Run `scripts/setup-gh-environment.sh --pipeline "
+                f"{pipeline_config.pipeline_id}` to create environment '{environment_name}' "
+                "and reconcile its variables."
+            ),
         )
 
     existing_variable_names = {
@@ -741,7 +748,10 @@ def _environment_variable_check(
         name="GitHub environment variables",
         status="MISSING",
         detail=f"Environment '{environment_name}' is missing variables: {missing_text}",
-        next_action=f"Add the required variables to the GitHub environment '{environment_name}'.",
+        next_action=(
+            "Run `scripts/setup-gh-environment.sh --pipeline "
+            f"{pipeline_config.pipeline_id}` to reconcile environment '{environment_name}'."
+        ),
     )
 
 

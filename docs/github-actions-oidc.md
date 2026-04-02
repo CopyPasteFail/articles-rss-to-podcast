@@ -114,42 +114,51 @@ If omitted, the tooling derives a default service account id from the pipeline i
 
 ## Setup flow
 
-1. Create the GitHub repository variables.
-2. Create one GitHub environment for each pipeline.
-3. Add the pipeline environment variables and secrets.
-4. Authenticate locally:
+1. Authenticate locally:
 
 ```bash
 gh auth login
 gcloud auth login
 ```
 
-5. Create local-only `pipelines/shared.yaml` if you want to run the GCP setup scripts.
-6. Run preflight:
+2. Create local-only `pipelines/shared.yaml` if you want to run the GCP setup scripts or the GitHub variable setup helper.
+3. Run preflight:
 
 ```bash
 python -m tools.preflight github --pipeline geektime-he
 ```
 
-7. Reconcile the shared OIDC pool and provider:
+4. Reconcile the shared OIDC pool and provider:
 
 ```bash
 scripts/setup-gcp-oidc-shared.sh --pipeline geektime-he
 ```
 
-8. Reconcile the dedicated pipeline service account:
+5. Reconcile the dedicated pipeline service account:
 
 ```bash
 scripts/setup-gcp-pipeline-sa.sh --pipeline geektime-he
 ```
 
-9. Push the environment secrets from local `.env`:
+6. Reconcile the shared GitHub repository variables and the pipeline environment variables:
+
+```bash
+scripts/setup-gh-environment.sh --pipeline geektime-he
+```
+
+This helper ensures:
+
+- repository variables: `GCP_PROJECT_ID`, `GCP_PROJECT_NUMBER`, `GCP_WIF_POOL_ID`, `GCP_WIF_PROVIDER_ID`
+- GitHub environment `geektime-he`
+- environment variables: `GCP_SERVICE_ACCOUNT_EMAIL`, `CF_PAGES_PROJECT`, `CF_KV_NAMESPACE_ID`
+
+7. Push the environment secrets from local `.env`:
 
 ```bash
 scripts/push-gh-secrets.sh --pipeline geektime-he
 ```
 
-10. Generate the workflow:
+8. Generate the workflow:
 
 ```bash
 python -m tools.generate_workflow --pipeline geektime-he
@@ -179,13 +188,10 @@ Local-mode preflight still checks:
 
 To add `eu-startups-en`:
 
-1. Create GitHub environment `eu-startups-en`.
-2. Add environment variables:
-   `GCP_SERVICE_ACCOUNT_EMAIL`, `CF_PAGES_PROJECT`, `CF_KV_NAMESPACE_ID`
-3. Add environment secrets:
-   `CLOUDFLARE_API_TOKEN`, `IA_ACCESS_KEY`, `IA_SECRET_KEY`
-4. Add `pipelines/eu-startups-en.yaml`.
-5. Generate `.github/workflows/eu-startups-en.yml`.
+1. Add `pipelines/eu-startups-en.yaml`.
+2. Run `scripts/setup-gh-environment.sh --pipeline eu-startups-en`.
+3. Run `scripts/push-gh-secrets.sh --pipeline eu-startups-en`.
+4. Generate `.github/workflows/eu-startups-en.yml`.
 
 The repository-level Google variables stay unchanged. No new branch is needed. No new repository is needed.
 
