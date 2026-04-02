@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Upload generated MP3s to Internet Archive and print the public download URL."""
 
-from __future__ import annotations  # keep compatibility with <3.11 lazy annotations
+from __future__ import annotations
 
 import hashlib
 import json
@@ -114,7 +114,7 @@ def retry_delay(attempt: int, response: requests.Response | None) -> float:
             base = max(base, retry_after)
         except (TypeError, ValueError):
             pass
-    return base * random.uniform(0.9, 1.1)
+    return base * random.uniform(0.9, 1.1)  # nosec B311
 
 
 def wait_with_progress(seconds: float) -> None:
@@ -216,7 +216,7 @@ def read_sidecar(mp3_path: pathlib.Path) -> dict[str, Any]:
 
 def link_id(link: str) -> str:
     """Generate deterministic IA identifiers per-article so reruns overwrite safely."""
-    h = hashlib.sha1(link.encode("utf-8")).hexdigest()[:16]
+    h = hashlib.sha1(link.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
     return f"tts-{IA_ID_PREFIX}-{h}"
 
 

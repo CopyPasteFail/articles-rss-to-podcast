@@ -5,7 +5,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 VENV_PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
 MISSING_DEPENDENCY_MODULE="yaml"
-BOOTSTRAP_COMMAND="python3.11 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+BOOTSTRAP_COMMAND="python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt"
 
 PYTHON_BIN=${PYTHON_BIN:-}
 if [[ -z "$PYTHON_BIN" ]]; then

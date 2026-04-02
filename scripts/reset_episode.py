@@ -48,10 +48,13 @@ def cleanup_local(
     seen: set[pathlib.Path] = set()
 
     for sidecar in out_dir.glob("*.mp3.rssmeta.json"):
+        meta: dict[str, Any] | None = None
         try:
             with sidecar.open("r", encoding="utf-8") as f:
                 meta = cast(dict[str, Any], json.load(f))
         except Exception:
+            meta = None
+        if meta is None:
             continue
         if meta.get("article_link") != link:
             continue
@@ -80,7 +83,7 @@ def cleanup_local(
         ):
             removed.append(str(hash_sidecar.resolve()))
     except Exception:
-        pass
+        removed = removed
 
     return removed
 

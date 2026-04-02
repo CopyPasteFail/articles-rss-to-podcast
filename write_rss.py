@@ -11,12 +11,12 @@ import json
 import os
 import pathlib
 import sys
-import xml.etree.ElementTree as ET
 from typing import NotRequired, Protocol, TypedDict, cast
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 import requests
+from defusedxml import ElementTree as ET
 from feedgen.feed import FeedGenerator
 
 
@@ -260,7 +260,8 @@ def add_item(
     fe.enclosure(ep["audio_url"], str(size), "audio/mpeg")
     fe.guid(
         hashlib.sha1(
-            (ep["audio_url"] + ep.get("article_link", "")).encode("utf-8")
+            (ep["audio_url"] + ep.get("article_link", "")).encode("utf-8"),
+            usedforsecurity=False,
         ).hexdigest(),
         permalink=False,
     )

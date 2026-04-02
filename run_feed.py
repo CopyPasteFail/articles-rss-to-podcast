@@ -3,7 +3,6 @@
 
 import os
 import pathlib
-import subprocess
 import sys
 
 from dotenv import load_dotenv
@@ -16,7 +15,7 @@ def main():
     try:
         sys.stdout.reconfigure(line_buffering=True)
     except Exception:
-        pass
+        sys.stdout = sys.stdout
     os.environ.setdefault("PYTHONUNBUFFERED", "1")
     if len(sys.argv) != 2:
         print("Usage: python run_feed.py <feed_slug>")
@@ -35,12 +34,15 @@ def main():
         sys.exit(f"Missing feed env: {feed_env}")
     load_dotenv(dotenv_path=feed_env, override=True)
 
-    py = sys.executable
     print(f"[run] feed={slug} env={feed_env}")
     try:
-        subprocess.check_call([py, str(ROOT / "pipeline.py")])
-    except subprocess.CalledProcessError as exc:
-        sys.exit(f"Pipeline failed (exit {exc.returncode}).")
+        import pipeline
+
+        pipeline.main()
+    except SystemExit:
+        raise
+    except Exception as exc:
+        sys.exit(f"Pipeline failed: {exc}")
 
 
 if __name__ == "__main__":

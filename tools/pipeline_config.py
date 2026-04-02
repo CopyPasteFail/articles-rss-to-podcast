@@ -45,7 +45,7 @@ FAILURE_EMAIL_SECRET_NAME_DEFAULTS = {
     "smtp_host": "SMTP_HOST",
     "smtp_port": "SMTP_PORT",
     "smtp_username": "SMTP_USERNAME",
-    "smtp_password": "SMTP_PASSWORD",
+    "smtp_password": "SMTP_PASSWORD",  # nosec B105
     "smtp_from": "SMTP_FROM",
 }
 

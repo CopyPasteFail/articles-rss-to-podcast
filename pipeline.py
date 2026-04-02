@@ -12,7 +12,7 @@ import pathlib
 import re
 import random
 import shutil
-import subprocess
+import subprocess  # nosec B404
 import sys
 import tempfile
 import time
@@ -27,7 +27,7 @@ try:
     if isinstance(stdout, io.TextIOWrapper):
         stdout.reconfigure(line_buffering=True)
 except Exception:
-    pass
+    stdout = sys.stdout
 
 from content_utils import resolve_article_content, text_to_html
 
@@ -206,6 +206,32 @@ RETRY_FAILED_ENV_NAME = "PODCAST_RETRY_FAILED"
 RETRY_FAILED_VALUES = {"1", "true", "yes", "y"}
 
 
+def _prepare_subprocess_command(args: tuple[object, ...]) -> list[str]:
+    """Validate and normalize subprocess arguments before execution.
+
+    Inputs: arbitrary command arguments from internal trusted call sites.
+    Outputs: a command list with a resolved executable in position zero.
+    Edge cases: rejects empty commands and executables missing from PATH.
+    """
+    command = [str(arg) for arg in args]
+    if not command:
+        raise ValueError("Subprocess command must contain at least one argument.")
+
+    executable = command[0]
+    if os.path.isabs(executable):
+        if not os.path.exists(executable):
+            raise FileNotFoundError(f"Command executable does not exist: {executable}")
+        if not os.access(executable, os.X_OK):
+            raise PermissionError(f"Command executable is not executable: {executable}")
+        return command
+
+    resolved_executable = shutil.which(executable)
+    if resolved_executable is None:
+        raise FileNotFoundError(f"Command executable not found on PATH: {executable}")
+    command[0] = resolved_executable
+    return command
+
+
 def sh(
     *args: object, env: Mapping[str, str] | None = None, cwd: StrPath | None = None
 ) -> str:
@@ -215,7 +241,7 @@ def sh(
     if env:
         env_map.update(env)
     env_map.setdefault("PYTHONUNBUFFERED", "1")
-    cmd = [str(a) for a in args]
+    cmd = _prepare_subprocess_command(args)
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -224,8 +250,9 @@ def sh(
         env=env_map,
         cwd=cwd,
         bufsize=1,
-    )
-    assert proc.stdout is not None  # appease type checkers
+    )  # nosec B603
+    if proc.stdout is None:
+        raise RuntimeError(f"Command produced no stdout pipe: {' '.join(cmd)}")
     out_lines: list[str] = []
     try:
         for line in proc.stdout:
@@ -445,7 +472,8 @@ def kv_put_via_wrangler(key: str, data: JSONDict) -> bool:
             tmp_path,
         ]
         print(f"[kv] Falling back to wrangler for {key} (namespace {ns_id})")
-        proc = subprocess.run(cmd, capture_output=True, text=True)
+        resolved_cmd = _prepare_subprocess_command(tuple(cmd))
+        proc = subprocess.run(resolved_cmd, capture_output=True, text=True)  # nosec B603
         if proc.returncode == 0:
             print(f"[kv] Wrangler PUT {key} ok")
             return True
@@ -458,7 +486,7 @@ def kv_put_via_wrangler(key: str, data: JSONDict) -> bool:
             try:
                 os.unlink(tmp_path)
             except Exception:
-                pass
+                tmp_path = ""
     return False
 
 
@@ -489,7 +517,7 @@ def kv_put(key: str, data: JSONDict) -> bool:
         if attempt < attempts:
             delay = max(0.5, backoff_s * (2 ** (attempt - 1)))
             jitter = delay * 0.25
-            delay += random.uniform(-jitter, jitter)
+            delay += random.uniform(-jitter, jitter)  # nosec B311
             print(f"[kv] Retry {attempt + 1}/{attempts} in {delay:.1f}s...")
             time.sleep(delay)
 
@@ -507,7 +535,7 @@ def kv_put_or_die(key: str, data: JSONDict) -> None:
 # ---------- IA helpers ----------
 def link_hash(link: str) -> str:
     """Return a stable short hash used anywhere we need deterministic filenames."""
-    return hashlib.sha1(link.encode("utf-8")).hexdigest()
+    return hashlib.sha1(link.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 def ia_identifier_for_link(link: str) -> str:

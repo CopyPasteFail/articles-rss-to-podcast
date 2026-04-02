@@ -337,7 +337,7 @@ def _python_runtime_check(repo_root: pathlib.Path) -> CheckResult:
             name="Python runtime",
             status="MISSING",
             detail="Neither `python` nor `python3` is available on PATH.",
-            next_action="Install Python 3.11 and create a virtualenv.",
+            next_action="Install Python 3.13 and create a virtualenv.",
         )
     try:
         version_text = run_command([python_command, "--version"], cwd=repo_root)
@@ -360,7 +360,7 @@ def _python_dependency_check(repo_root: pathlib.Path) -> CheckResult:
             name="Python dependencies",
             status="MISSING",
             detail="Neither `python` nor `python3` is available on PATH.",
-            next_action="Install Python 3.11 and run `pip install -r requirements.txt`.",
+            next_action="Install Python 3.13 and run `pip install -r requirements.txt`.",
         )
     dependency_check_command = [
         python_command,

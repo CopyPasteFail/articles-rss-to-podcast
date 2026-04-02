@@ -6,7 +6,7 @@ import json
 import os
 import pathlib
 import shutil
-import subprocess
+import subprocess  # nosec B404
 from dataclasses import dataclass
 
 import requests
@@ -66,18 +66,36 @@ def run_command(
     Outputs: stripped stdout text, or combined output in the raised exception.
     Edge cases: commands that only write to stderr still return useful output.
     """
+    if not command:
+        raise ValueError("Command list must contain at least one argument.")
+
+    executable = command[0]
+    if os.path.isabs(executable):
+        executable_path = pathlib.Path(executable)
+        if not executable_path.exists():
+            raise FileNotFoundError(f"Command executable does not exist: {executable}")
+        if not os.access(executable_path, os.X_OK):
+            raise PermissionError(f"Command executable is not executable: {executable}")
+        normalized_command = [str(executable_path), *command[1:]]
+    else:
+        resolved_executable = shutil.which(executable)
+        if resolved_executable is None:
+            raise FileNotFoundError(
+                f"Command executable not found on PATH: {executable}"
+            )
+        normalized_command = [resolved_executable, *command[1:]]
 
     completed = subprocess.run(
-        command,
+        normalized_command,
         cwd=str(cwd) if cwd else None,
         capture_output=True,
         text=True,
-    )
+    )  # nosec B603
     output = "\n".join(
         part for part in (completed.stdout.strip(), completed.stderr.strip()) if part
     ).strip()
     if check and completed.returncode != 0:
-        raise CommandExecutionError(command, completed.returncode, output)
+        raise CommandExecutionError(normalized_command, completed.returncode, output)
     return output
 
 
