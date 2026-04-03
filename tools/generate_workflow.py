@@ -14,6 +14,31 @@ from tools.pipeline_config import (
 )
 
 
+def build_google_auth_mask_step() -> str:
+    """Render a workflow step that masks Google auth metadata before auth runs.
+
+    Inputs: none.
+    Outputs: YAML for one GitHub Actions shell step.
+    Edge cases: masks both the full provider path and its component values so
+    later action logs redact whichever form appears. It also masks the runner
+    workspace prefix and the `gha-creds-` filename prefix to reduce how much of
+    the temporary credentials path is visible if the auth action logs it.
+    """
+
+    return """      - name: Mask Google auth metadata
+        shell: bash
+        run: |
+          echo "::add-mask::${{ vars.GCP_PROJECT_ID }}"
+          echo "::add-mask::${{ vars.GCP_PROJECT_NUMBER }}"
+          echo "::add-mask::${{ vars.GCP_WIF_POOL_ID }}"
+          echo "::add-mask::${{ vars.GCP_WIF_PROVIDER_ID }}"
+          echo "::add-mask::projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WIF_POOL_ID }}/providers/${{ vars.GCP_WIF_PROVIDER_ID }}"
+          echo "::add-mask::${{ vars.GCP_SERVICE_ACCOUNT_EMAIL }}"
+          echo "::add-mask::${{ github.workspace }}"
+          echo "::add-mask::gha-creds-"
+"""
+
+
 def generate_workflow_yaml(pipeline_config: PipelineConfig) -> str:
     """Render the full GitHub Actions workflow for one pipeline config.
 
@@ -23,6 +48,7 @@ def generate_workflow_yaml(pipeline_config: PipelineConfig) -> str:
     """
 
     schedule_entries = render_schedule_cron_entries(pipeline_config.schedule)
+    google_auth_mask_step = build_google_auth_mask_step()
     schedule_lines = "\n".join(
         [
             "  schedule:",
@@ -90,6 +116,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+{google_auth_mask_step}
       - uses: google-github-actions/auth@v3
         with:
           project_id: '${{{{ vars.GCP_PROJECT_ID }}}}'

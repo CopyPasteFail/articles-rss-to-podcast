@@ -221,14 +221,20 @@ def link_id(link: str) -> str:
 
 
 def get_ia_session() -> ArchiveSession:
-    """Decide whether to use explicit env credentials or fall back to local config."""
+    """Build the IA session without logging the concrete credential source.
+
+    Inputs: none. Reads IA_ACCESS_KEY and IA_SECRET_KEY from the environment.
+    Outputs: initialized ArchiveSession.
+    Edge cases: clears IA_CONFIG_FILE so unrelated local settings do not affect
+    uploads, while keeping logs free of credential-source details.
+    """
+
     os.environ.pop("IA_CONFIG_FILE", None)
     ak = os.getenv("IA_ACCESS_KEY")
     sk = os.getenv("IA_SECRET_KEY")
+    print("Initializing Internet Archive session", flush=True)
     if ak and sk:
-        print("Using IA credentials from env vars")
         return get_session(config={"s3": {"access": ak, "secret": sk}}, config_file="")
-    print("Using default IA config from home dir")
     return get_session(config_file="")
 
 

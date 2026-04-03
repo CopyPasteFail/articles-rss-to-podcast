@@ -20,6 +20,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Mask Google auth metadata
+        shell: bash
+        run: |
+          echo "::add-mask::${{ vars.GCP_PROJECT_ID }}"
+          echo "::add-mask::${{ vars.GCP_PROJECT_NUMBER }}"
+          echo "::add-mask::${{ vars.GCP_WIF_POOL_ID }}"
+          echo "::add-mask::${{ vars.GCP_WIF_PROVIDER_ID }}"
+          echo "::add-mask::projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.GCP_WIF_POOL_ID }}/providers/${{ vars.GCP_WIF_PROVIDER_ID }}"
+          echo "::add-mask::${{ vars.GCP_SERVICE_ACCOUNT_EMAIL }}"
+          echo "::add-mask::${{ github.workspace }}"
+          echo "::add-mask::gha-creds-"
+
       - uses: google-github-actions/auth@v3
         with:
           project_id: '${{ vars.GCP_PROJECT_ID }}'

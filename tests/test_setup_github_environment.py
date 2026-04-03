@@ -207,3 +207,18 @@ def test_generate_workflow_yaml_installs_ffmpeg() -> None:
 
     assert "Install Audio Dependencies" in workflow_yaml
     assert "sudo apt-get update && sudo apt-get install -y ffmpeg" in workflow_yaml
+
+
+def test_generate_workflow_yaml_masks_google_auth_metadata() -> None:
+    """Generated workflows should mask Google auth metadata before auth runs."""
+
+    workflow_yaml = generate_workflow_yaml(build_pipeline_config())
+
+    assert "Mask Google auth metadata" in workflow_yaml
+    assert 'echo "::add-mask::${{ vars.GCP_SERVICE_ACCOUNT_EMAIL }}"' in workflow_yaml
+    assert (
+        'echo "::add-mask::projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/'
+        'workloadIdentityPools/${{ vars.GCP_WIF_POOL_ID }}/providers/${{ '
+        'vars.GCP_WIF_PROVIDER_ID }}"'
+    ) in workflow_yaml
+    assert 'echo "::add-mask::${{ github.workspace }}"' in workflow_yaml
