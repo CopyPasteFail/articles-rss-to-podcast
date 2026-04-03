@@ -141,7 +141,7 @@ jobs:
             tail -n 80 "${{{{ steps.run_pipeline.outputs.log_file }}}}" || true
             echo '```'
           }} >> "$GITHUB_STEP_SUMMARY"
-{failure_email_steps}"""
+{failure_email_steps}"""  # nosec B608
 
 
 def write_workflow_file(pipeline_config: PipelineConfig) -> pathlib.Path:
