@@ -260,9 +260,7 @@ def _parse_wordpress_post_pub_utc(post: Mapping[str, Any]) -> str:
             continue
         if parsed_datetime.tzinfo is None:
             if field_name.endswith("_gmt"):
-                parsed_datetime = parsed_datetime.replace(
-                    tzinfo=datetime.timezone.utc
-                )
+                parsed_datetime = parsed_datetime.replace(tzinfo=datetime.timezone.utc)
             else:
                 parsed_datetime = parsed_datetime.astimezone().astimezone(
                     datetime.timezone.utc
