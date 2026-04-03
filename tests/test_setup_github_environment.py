@@ -218,7 +218,7 @@ def test_generate_workflow_yaml_masks_google_auth_metadata() -> None:
     assert 'echo "::add-mask::${{ vars.GCP_SERVICE_ACCOUNT_EMAIL }}"' in workflow_yaml
     assert (
         'echo "::add-mask::projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/'
-        'workloadIdentityPools/${{ vars.GCP_WIF_POOL_ID }}/providers/${{ '
+        "workloadIdentityPools/${{ vars.GCP_WIF_POOL_ID }}/providers/${{ "
         'vars.GCP_WIF_PROVIDER_ID }}"'
     ) in workflow_yaml
     assert 'echo "::add-mask::${{ github.workspace }}"' in workflow_yaml
