@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import html
 import importlib
 import json
 import os
@@ -19,6 +20,7 @@ import time
 import io
 from collections.abc import Mapping
 from typing import Any, Protocol, TypedDict, cast
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
 
@@ -159,6 +161,217 @@ def _payload_looks_like_html(payload: bytes) -> bool:
     return snippet.startswith("<!doctype html") or snippet.startswith("<html")
 
 
+def _build_wordpress_posts_api_url(
+    wordpress_posts_api_url: str,
+    *,
+    limit: int | None,
+) -> str:
+    """Add stable query params to the WordPress posts API URL.
+
+    Inputs: base posts API URL and optional entry limit requested by the caller.
+    Outputs: full URL with ``_embed=1`` and a bounded ``per_page`` parameter.
+    Edge cases: existing query params are preserved, and smaller caller limits win.
+    """
+
+    parsed_url = urlsplit(wordpress_posts_api_url)
+    query_pairs = dict(parse_qsl(parsed_url.query, keep_blank_values=True))
+    query_pairs["_embed"] = "1"
+
+    existing_per_page_raw = query_pairs.get("per_page", "").strip()
+    per_page = DEFAULT_WORDPRESS_POSTS_PER_PAGE
+    if existing_per_page_raw:
+        try:
+            parsed_per_page = int(existing_per_page_raw)
+        except ValueError:
+            parsed_per_page = DEFAULT_WORDPRESS_POSTS_PER_PAGE
+        if parsed_per_page > 0:
+            per_page = parsed_per_page
+
+    if limit is not None and limit > 0:
+        per_page = min(per_page, limit)
+
+    query_pairs["per_page"] = str(per_page)
+    return urlunsplit(
+        (
+            parsed_url.scheme,
+            parsed_url.netloc,
+            parsed_url.path,
+            urlencode(query_pairs),
+            parsed_url.fragment,
+        )
+    )
+
+
+def _strip_html_tags(html_value: str) -> str:
+    """Collapse a small HTML fragment into readable plain text.
+
+    Inputs: HTML string from WordPress title or excerpt fields.
+    Outputs: decoded text with tags removed and surrounding whitespace trimmed.
+    Edge cases: empty strings, entities, or fragments that already contain plain text.
+    """
+
+    if not html_value:
+        return ""
+    text_without_tags = re.sub(r"<[^>]+>", " ", html_value)
+    return re.sub(r"\s+", " ", html.unescape(text_without_tags)).strip()
+
+
+def _to_mapping(value: object) -> Mapping[str, Any]:
+    """Return ``value`` as a mapping when possible so nested JSON access stays explicit.
+
+    Inputs: arbitrary object loaded from a JSON response.
+    Outputs: mapping view when ``value`` is a dict-like object, otherwise an empty mapping.
+    Edge cases: nested arrays or scalars safely return an empty mapping.
+    """
+
+    if isinstance(value, Mapping):
+        return value
+    return {}
+
+
+def _first_mapping_item(value: object) -> Mapping[str, Any]:
+    """Return the first mapping item from a list-like JSON field.
+
+    Inputs: JSON value that may contain a list of dicts.
+    Outputs: first mapping item or an empty mapping when unavailable.
+    Edge cases: empty lists, scalar values, or non-dict list items.
+    """
+
+    if not isinstance(value, list) or not value:
+        return {}
+    return _to_mapping(value[0])
+
+
+def _parse_wordpress_post_pub_utc(post: Mapping[str, Any]) -> str:
+    """Extract a stable UTC publication timestamp from a WordPress post payload.
+
+    Inputs: WordPress post mapping that may include ``date_gmt`` or ``date``.
+    Outputs: ISO-8601 UTC timestamp string.
+    Edge cases: malformed or missing dates fall back to the current UTC timestamp.
+    """
+
+    for field_name in ("date_gmt", "modified_gmt", "date", "modified"):
+        raw_value = str(post.get(field_name, "")).strip()
+        if not raw_value:
+            continue
+        try:
+            parsed_datetime = datetime.datetime.fromisoformat(raw_value)
+        except ValueError:
+            continue
+        if parsed_datetime.tzinfo is None:
+            if field_name.endswith("_gmt"):
+                parsed_datetime = parsed_datetime.replace(
+                    tzinfo=datetime.timezone.utc
+                )
+            else:
+                parsed_datetime = parsed_datetime.astimezone().astimezone(
+                    datetime.timezone.utc
+                )
+        else:
+            parsed_datetime = parsed_datetime.astimezone(datetime.timezone.utc)
+        return parsed_datetime.isoformat()
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def _entry_from_wordpress_post(post: Mapping[str, Any]) -> EntryDict:
+    """Convert a WordPress REST API post payload into the pipeline entry schema.
+
+    Inputs: one post object from ``/wp-json/wp/v2/posts`` with optional ``_embed`` data.
+    Outputs: entry dict compatible with the rest of the pipeline.
+    Edge cases: missing author/media embeds, HTML titles, or empty excerpts.
+    """
+
+    title_html = str(_to_mapping(post.get("title")).get("rendered", "")).strip()
+    content_html = str(_to_mapping(post.get("content")).get("rendered", "")).strip()
+    excerpt_html = str(_to_mapping(post.get("excerpt")).get("rendered", "")).strip()
+    article_link = str(post.get("link", "")).strip()
+
+    embedded = _to_mapping(post.get("_embedded"))
+    featured_media = _first_mapping_item(embedded.get("wp:featuredmedia"))
+    author_data = _first_mapping_item(embedded.get("author"))
+
+    article_title = _strip_html_tags(title_html)
+    article_summary = _strip_html_tags(excerpt_html)
+    if not article_summary and content_html:
+        article_summary = _strip_html_tags(content_html)
+
+    article_image_url = str(featured_media.get("source_url", "")).strip()
+    article_author = str(author_data.get("name", "")).strip()
+
+    return {
+        "article_title": article_title or article_link,
+        "article_summary": article_summary,
+        "article_summary_html": content_html or text_to_html(article_summary),
+        "article_subtitle": "",
+        "article_link": article_link,
+        "article_author": article_author,
+        "article_pub_utc": _parse_wordpress_post_pub_utc(post),
+        "article_image_url": article_image_url,
+    }
+
+
+def _fetch_entries_from_wordpress_posts_api(
+    wordpress_posts_api_url: str,
+    *,
+    limit: int | None,
+    http_get: Any | None = None,
+) -> list[EntryDict]:
+    """Fetch recent entries from a WordPress REST posts endpoint.
+
+    Inputs: posts API URL, optional limit, and injectable HTTP client for tests.
+    Outputs: list of pipeline entries sorted by publication time.
+    Edge cases: empty API responses, invalid JSON, or non-list payloads raise SystemExit.
+    """
+
+    request_url = _build_wordpress_posts_api_url(
+        wordpress_posts_api_url,
+        limit=limit,
+    )
+    source_feed_context = f"WordPress posts API '{request_url}'"
+    headers = {
+        "User-Agent": RSS_HTTP_USER_AGENT,
+        "Accept": "application/json, */*;q=0.8",
+    }
+
+    request_get = http_get or requests.get
+
+    try:
+        response = request_get(
+            request_url,
+            headers=headers,
+            timeout=(RSS_HTTP_CONNECT_TIMEOUT_S, RSS_HTTP_READ_TIMEOUT_S),
+        )
+        response.raise_for_status()
+    except requests.Timeout:
+        raise SystemExit(
+            f"Failed to fetch fallback {source_feed_context}: request timed out."
+        )
+    except requests.RequestException as exc:
+        raise SystemExit(
+            f"Failed to fetch fallback {source_feed_context}: {exc}"
+        ) from exc
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise SystemExit(
+            f"Failed to parse fallback {source_feed_context}: invalid JSON."
+        ) from exc
+
+    if not isinstance(payload, list):
+        raise SystemExit(
+            f"Failed to parse fallback {source_feed_context}: expected a JSON array."
+        )
+    if not payload:
+        raise SystemExit(f"Fallback {source_feed_context} returned no posts.")
+
+    entries = [_entry_from_wordpress_post(_to_mapping(post)) for post in payload]
+    entries.sort(key=lambda entry: entry["article_pub_utc"])
+    if limit is not None:
+        entries = entries[-limit:]
+    return entries
+
+
 # Root folders used throughout the flow (generation -> upload -> deploy).
 ROOT = pathlib.Path(__file__).resolve().parent
 OUT = pathlib.Path(os.getenv("OUT_DIR", "./out")).resolve()
@@ -180,11 +393,13 @@ _cf_kv_namespace_id = os.getenv("CF_KV_NAMESPACE_ID", "").strip()
 SLUG = os.getenv("PODCAST_SLUG", "default").strip()
 IA_ID_PREFIX = os.getenv("IA_ID_PREFIX", SLUG).strip() or SLUG
 RSS_URL = os.getenv("RSS_URL", "").strip()
+WORDPRESS_POSTS_API_URL = os.getenv("WORDPRESS_POSTS_API_URL", "").strip()
 RSS_HTTP_USER_AGENT = "tts-podcast-rss-fetcher/1.0"
 RSS_HTTP_CONNECT_TIMEOUT_S = 10.0
 RSS_HTTP_READ_TIMEOUT_S = 20.0
 RSS_HTTP_CLOUDFLARE_STATUS_CODES = {520, 521, 522, 523, 524, 525, 526}
 RSS_HTTP_BLOCK_STATUS_CODES = {403, 429, 503}
+DEFAULT_WORDPRESS_POSTS_PER_PAGE = 20
 FAILURE_MESSAGE_MAX_CHARS = 500
 FAILURE_TRUNCATION_SUFFIX = "...[truncated]"
 FAILED_ENTRY_AT_UTC_KEY = "last_failure_at_utc"
@@ -739,9 +954,27 @@ def fetch_entries_from_rss(limit: int | None = None) -> list[EntryDict]:
     feedparser = _get_feedparser()
     payload, rss_error = _fetch_rss_payload(RSS_URL)
     if rss_error:
+        if WORDPRESS_POSTS_API_URL:
+            print(
+                "[warn] RSS fetch failed; falling back to WordPress posts API "
+                f"{WORDPRESS_POSTS_API_URL}"
+            )
+            return _fetch_entries_from_wordpress_posts_api(
+                WORDPRESS_POSTS_API_URL,
+                limit=limit,
+            )
         raise SystemExit(rss_error)
     if payload is not None:
         if _payload_looks_like_html(payload):
+            if WORDPRESS_POSTS_API_URL:
+                print(
+                    "[warn] RSS fetch returned HTML; falling back to WordPress posts API "
+                    f"{WORDPRESS_POSTS_API_URL}"
+                )
+                return _fetch_entries_from_wordpress_posts_api(
+                    WORDPRESS_POSTS_API_URL,
+                    limit=limit,
+                )
             raise SystemExit(
                 "RSS fetch returned HTML instead of XML (possible CDN block or origin error)."
             )

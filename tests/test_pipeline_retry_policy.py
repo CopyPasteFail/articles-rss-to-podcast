@@ -53,6 +53,147 @@ def test_should_skip_failed_entry_only_when_retry_is_exhausted() -> None:
     )
 
 
+def test_fetch_entries_from_rss_falls_back_to_wordpress_posts_api_when_rss_is_blocked(
+    monkeypatch,
+) -> None:
+    """Blocked RSS fetches should use the configured WordPress API fallback.
+
+    Inputs: Cloudflare-style RSS fetch failure plus a mocked WordPress posts payload.
+    Outputs: entries built from the fallback JSON payload.
+    Edge cases: preserves article metadata from embedded author and featured media data.
+    """
+
+    monkeypatch.setattr(pipeline, "RSS_URL", "https://example.com/feed.xml")
+    monkeypatch.setattr(
+        pipeline,
+        "WORDPRESS_POSTS_API_URL",
+        "https://example.com/wp-json/wp/v2/posts",
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_fetch_rss_payload",
+        lambda rss_url: (
+            None,
+            "Failed to fetch source RSS feed 'https://example.com/feed.xml': blocked at Cloudflare (HTTP 403).",
+        ),
+    )
+
+    wordpress_posts_payload = [
+        {
+            "title": {"rendered": "Example <em>Title</em>"},
+            "content": {"rendered": "<p>Full story body</p>"},
+            "excerpt": {"rendered": "<p>Short summary</p>"},
+            "link": "https://example.com/articles/example-title",
+            "date_gmt": "2026-04-03T05:56:12",
+            "_embedded": {
+                "author": [{"name": "Example Author"}],
+                "wp:featuredmedia": [
+                    {"source_url": "https://example.com/images/example.jpg"}
+                ],
+            },
+        }
+    ]
+
+    class FakeJSONResponse:
+        """Simple ``requests`` response stub for fallback API tests."""
+
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            """Mirror ``requests.Response.raise_for_status`` for a successful response."""
+
+        def json(self) -> object:
+            """Return the canned WordPress payload for this test."""
+
+            return wordpress_posts_payload
+
+    def fake_http_get(url: str, headers: dict[str, str], timeout: object) -> object:
+        assert "_embed=1" in url
+        assert "per_page=20" in url
+        assert headers["Accept"].startswith("application/json")
+        assert timeout == (
+            pipeline.RSS_HTTP_CONNECT_TIMEOUT_S,
+            pipeline.RSS_HTTP_READ_TIMEOUT_S,
+        )
+        return FakeJSONResponse()
+
+    monkeypatch.setattr(pipeline.requests, "get", fake_http_get)
+
+    entries = pipeline.fetch_entries_from_rss()
+
+    assert entries == [
+        {
+            "article_title": "Example Title",
+            "article_summary": "Short summary",
+            "article_summary_html": "<p>Full story body</p>",
+            "article_subtitle": "",
+            "article_link": "https://example.com/articles/example-title",
+            "article_author": "Example Author",
+            "article_pub_utc": "2026-04-03T05:56:12+00:00",
+            "article_image_url": "https://example.com/images/example.jpg",
+        }
+    ]
+
+
+def test_fetch_entries_from_rss_uses_wordpress_posts_limit_when_requested(
+    monkeypatch,
+) -> None:
+    """Fallback WordPress requests should honor the caller's entry limit.
+
+    Inputs: explicit fetch limit and a mocked WordPress API URL without query params.
+    Outputs: request URL that includes the bounded ``per_page`` value.
+    Edge cases: does not depend on feedparser when the RSS fetch already failed.
+    """
+
+    requested_urls: list[str] = []
+
+    monkeypatch.setattr(pipeline, "RSS_URL", "https://example.com/feed.xml")
+    monkeypatch.setattr(
+        pipeline,
+        "WORDPRESS_POSTS_API_URL",
+        "https://example.com/wp-json/wp/v2/posts",
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_fetch_rss_payload",
+        lambda rss_url: (None, "Failed to fetch source RSS feed."),
+    )
+
+    class FakeJSONResponse:
+        """Minimal JSON response stub for WordPress limit coverage."""
+
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            """Mirror the success path of ``requests``."""
+
+        def json(self) -> object:
+            """Return one post so the fallback can complete successfully."""
+
+            return [
+                {
+                    "title": {"rendered": "Example"},
+                    "content": {"rendered": "<p>Body</p>"},
+                    "excerpt": {"rendered": "<p>Summary</p>"},
+                    "link": "https://example.com/articles/example",
+                    "date_gmt": "2026-04-03T05:56:12",
+                }
+            ]
+
+    def fake_http_get(url: str, headers: dict[str, str], timeout: object) -> object:
+        requested_urls.append(url)
+        return FakeJSONResponse()
+
+    monkeypatch.setattr(pipeline.requests, "get", fake_http_get)
+
+    entries = pipeline.fetch_entries_from_rss(limit=3)
+
+    assert len(entries) == 1
+    assert requested_urls == [
+        "https://example.com/wp-json/wp/v2/posts?_embed=1&per_page=3"
+    ]
+
+
 def test_main_fails_when_entry_reaches_retry_limit(
     monkeypatch,
     tmp_path: pathlib.Path,
