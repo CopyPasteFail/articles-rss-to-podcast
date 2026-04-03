@@ -114,7 +114,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: {pipeline_config.github.environment_name}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
 {google_auth_mask_step}
       - uses: google-github-actions/auth@v3
@@ -125,7 +125,7 @@ jobs:
           create_credentials_file: true
           export_environment_variables: true
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
 
