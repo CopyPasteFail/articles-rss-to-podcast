@@ -16,7 +16,9 @@ class FakeResponse:
         return None
 
 
-def test_parse_rss_source_fetches_http_with_explicit_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_parse_rss_source_fetches_http_with_explicit_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[dict[str, object]] = []
     parsed_result = SimpleNamespace(entries=[])
 
