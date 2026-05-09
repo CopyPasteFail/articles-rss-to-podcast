@@ -53,6 +53,13 @@ class SidecarPayload(TypedDict):
     tts_generated: bool
 
 
+class ParsedRssSource(TypedDict):
+    """Parsed RSS data plus the already-fetched payload when available."""
+
+    parsed: feedparser.FeedParserDict
+    payload: bytes | None
+
+
 class _TTSClient(Protocol):
     """Protocol to help type-check Google Text-to-Speech client usage."""
 
@@ -77,6 +84,7 @@ RSS_DEBUG_FILENAME = "last_rss.xml"
 RSS_DEBUG_SNIPPET_CHARS = 400
 RSS_DEBUG_HTTP_CONNECT_TIMEOUT_S = 10.0
 RSS_DEBUG_HTTP_READ_TIMEOUT_S = 20.0
+RSS_HTTP_USER_AGENT = "tts-podcast-rss-fetcher/1.0"
 
 
 def _ensure_str(value: object, *, default: str = "") -> str:
@@ -89,12 +97,7 @@ def _ensure_str(value: object, *, default: str = "") -> str:
 
 
 def _describe_rss_source(rss_url: str) -> str:
-    """Return a concise description of the RSS input (URL, file path, or inline XML).
-
-    Inputs: rss_url from RSS_URL; may be empty, a URL, a local path, or inline XML.
-    Outputs: a short human-readable description (never the full inline XML payload).
-    Edge cases: empty string, non-existent path, inline XML with leading whitespace.
-    """
+    """Return a concise description of the RSS input (URL, file path, or inline XML)."""
     if not rss_url:
         return "RSS_URL is empty"
     stripped = rss_url.lstrip()
@@ -112,12 +115,7 @@ def _describe_rss_source(rss_url: str) -> str:
 
 
 def _looks_like_html(payload_text: str) -> bool:
-    """Detect obvious HTML payloads that are masquerading as RSS/Atom feeds.
-
-    Inputs: decoded text payload (best-effort).
-    Outputs: True when the content resembles HTML, False otherwise.
-    Edge cases: leading whitespace, mixed-case tags, short payloads.
-    """
+    """Detect obvious HTML payloads that are masquerading as RSS/Atom feeds."""
     stripped = payload_text.lstrip().lower()
     if stripped.startswith("<!doctype html") or stripped.startswith("<html"):
         return True
@@ -125,12 +123,7 @@ def _looks_like_html(payload_text: str) -> bool:
 
 
 def _decode_rss_payload_for_debug(payload: bytes) -> str:
-    """Decode RSS bytes for debug output, handling gzip and invalid UTF-8 safely.
-
-    Inputs: raw bytes captured from disk or HTTP.
-    Outputs: decoded text (replacement characters on decode errors).
-    Edge cases: gzip payloads, invalid encodings, empty payloads.
-    """
+    """Decode RSS bytes for debug output, handling gzip and invalid UTF-8 safely."""
     if payload.startswith(b"\x1f\x8b"):
         try:
             payload = gzip.decompress(payload)
@@ -144,12 +137,7 @@ def _read_rss_payload_for_debug(
     *,
     http_get: Callable[..., requests.Response] = requests.get,
 ) -> bytes | None:
-    """Fetch or read the RSS payload for debugging when parsing yields no entries.
-
-    Inputs: rss_url from RSS_URL and an injectable http_get function for HTTP fetches.
-    Outputs: raw bytes, or None if the payload cannot be accessed.
-    Edge cases: inline XML, missing files, network errors, non-HTTP strings.
-    """
+    """Fetch or read the RSS payload for debugging when parsing yields no entries."""
     if not rss_url:
         return None
     stripped = rss_url.lstrip()
@@ -168,6 +156,10 @@ def _read_rss_payload_for_debug(
         try:
             response = http_get(
                 rss_url,
+                headers={
+                    "User-Agent": RSS_HTTP_USER_AGENT,
+                    "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
+                },
                 timeout=(
                     RSS_DEBUG_HTTP_CONNECT_TIMEOUT_S,
                     RSS_DEBUG_HTTP_READ_TIMEOUT_S,
@@ -183,15 +175,61 @@ def _read_rss_payload_for_debug(
     return None
 
 
+def _parse_rss_source(
+    rss_url: str,
+    *,
+    http_get: Callable[..., requests.Response] = requests.get,
+) -> ParsedRssSource:
+    """Parse RSS without letting feedparser own live HTTP fetching.
+
+    feedparser.parse(url) can block for much longer than the pipeline expects when a
+    source server stalls. For HTTP(S) feeds, fetch the payload with explicit requests
+    timeouts first, then let feedparser parse the downloaded bytes only.
+    """
+    stripped = rss_url.lstrip()
+    if rss_url.startswith(("http://", "https://")):
+        try:
+            response = http_get(
+                rss_url,
+                headers={
+                    "User-Agent": RSS_HTTP_USER_AGENT,
+                    "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
+                },
+                timeout=(
+                    RSS_DEBUG_HTTP_CONNECT_TIMEOUT_S,
+                    RSS_DEBUG_HTTP_READ_TIMEOUT_S,
+                ),
+            )
+            response.raise_for_status()
+        except requests.Timeout as exc:
+            raise SystemExit(
+                "RSS fetch timed out before parsing; source feed did not respond within "
+                f"{RSS_DEBUG_HTTP_READ_TIMEOUT_S:g}s read timeout"
+            ) from exc
+        except requests.RequestException as exc:
+            raise SystemExit(f"RSS fetch failed before parsing: {exc}") from exc
+        payload = response.content
+        return ParsedRssSource(parsed=feedparser.parse(payload), payload=payload)
+
+    if stripped.startswith("<"):
+        payload = rss_url.encode("utf-8", errors="replace")
+        return ParsedRssSource(parsed=feedparser.parse(payload), payload=payload)
+
+    rss_path = pathlib.Path(rss_url)
+    if rss_path.exists():
+        try:
+            payload = rss_path.read_bytes()
+        except OSError as exc:
+            raise SystemExit(f"RSS file read failed before parsing: {exc}") from exc
+        return ParsedRssSource(parsed=feedparser.parse(payload), payload=payload)
+
+    return ParsedRssSource(parsed=feedparser.parse(rss_url), payload=None)
+
+
 def _log_feedparser_diagnostics(
     parsed: feedparser.FeedParserDict, *, entries_count: int
 ) -> None:
-    """Log feedparser diagnostics to help explain why a feed produced zero entries.
-
-    Inputs: parsed feedparser result and entries_count from that parse.
-    Outputs: None (prints to stdout).
-    Edge cases: missing feedparser attributes or exceptions during formatting.
-    """
+    """Log feedparser diagnostics to help explain why a feed produced zero entries."""
     bozo_flag = bool(getattr(parsed, "bozo", False))
     bozo_exception = getattr(parsed, "bozo_exception", None)
     href = getattr(parsed, "href", None)
@@ -202,16 +240,11 @@ def _log_feedparser_diagnostics(
         print(f"RSS parse bozo={bozo_flag} exception={bozo_exception}")
 
 
-def _dump_rss_debug(rss_url: str) -> None:
-    """Persist the RSS payload and print a short snippet when parsing yields no entries.
-
-    Inputs: rss_url from RSS_URL.
-    Outputs: None (writes a debug file and prints summary/snippet).
-    Edge cases: payload unavailable, file write errors, non-UTF-8 payloads.
-    Atomicity: debug file write is best-effort and not atomic.
-    """
+def _dump_rss_debug(rss_url: str, *, payload: bytes | None = None) -> None:
+    """Persist the RSS payload and print a short snippet when parsing yields no entries."""
     print(f"RSS debug source (RSS_URL): {_describe_rss_source(rss_url)}")
-    payload = _read_rss_payload_for_debug(rss_url)
+    if payload is None:
+        payload = _read_rss_payload_for_debug(rss_url)
     if payload is None:
         print("RSS debug: no payload available to dump")
         return
@@ -284,11 +317,12 @@ def feed_entry_to_meta(e: object, *, allow_fetch: bool = False) -> EntryMeta:
 
 def select_entry() -> EntryMeta:
     """Pick the requested feed entry (or the latest) as the base article for the episode."""
-    parsed: feedparser.FeedParserDict = feedparser.parse(RSS_URL)
+    parsed_source = _parse_rss_source(RSS_URL)
+    parsed = parsed_source["parsed"]
     entries: list[object] = list(parsed.entries)
     if not entries:
         _log_feedparser_diagnostics(parsed, entries_count=0)
-        _dump_rss_debug(RSS_URL)
+        _dump_rss_debug(RSS_URL, payload=parsed_source["payload"])
         sys.exit("RSS has no entries; see RSS debug output above")
 
     def matches_target(entry: object) -> bool:
