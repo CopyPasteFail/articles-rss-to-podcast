@@ -39,8 +39,7 @@ def test_parse_rss_source_fetches_http_with_explicit_timeout(
 
     assert parsed_source["parsed"] is parsed_result
     assert (
-        parsed_source["payload"]
-        == b"<rss><channel><title>Feed</title></channel></rss>"
+        parsed_source["payload"] == b"<rss><channel><title>Feed</title></channel></rss>"
     )
     assert calls == [
         {
