@@ -72,3 +72,65 @@ def test_parse_rss_source_timeout_fails_before_feedparser_parse(
             "https://example.com/feed.xml",
             http_get=fake_get,
         )
+
+
+def test_select_entry_falls_back_to_wordpress_posts_api_after_rss_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fallback_entry = SimpleNamespace(
+        title="Fallback title",
+        link="https://example.com/fallback-title",
+        id="101",
+        author="Example Author",
+        summary="Fallback article body",
+        description="Fallback article body",
+        published_parsed=(2026, 5, 9, 6, 30, 0, 0, 0, 0),
+    )
+
+    monkeypatch.setattr(one_episode, "RSS_URL", "https://example.com/feed.xml")
+    monkeypatch.setattr(
+        one_episode,
+        "WORDPRESS_POSTS_API_URL",
+        "https://example.com/wp-json/wp/v2/posts",
+    )
+
+    def fail_parse(rss_url: str) -> object:
+        raise SystemExit("RSS fetch timed out before parsing")
+
+    monkeypatch.setattr(one_episode, "_parse_rss_source", fail_parse)
+    monkeypatch.setattr(
+        one_episode,
+        "_fetch_entries_from_wordpress_posts_api",
+        lambda wordpress_posts_api_url: [fallback_entry],
+    )
+    monkeypatch.setattr(
+        one_episode,
+        "resolve_article_content",
+        lambda entry, link, allow_fetch: (
+            entry.summary,
+            "<p>Fallback article body</p>",
+            "",
+            "",
+        ),
+    )
+
+    selected = one_episode.select_entry()
+
+    assert selected["title"] == "Fallback title"
+    assert selected["link"] == "https://example.com/fallback-title"
+    assert selected["article_text"] == "Fallback article body"
+
+
+def test_select_entry_does_not_swallow_rss_timeout_without_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(one_episode, "RSS_URL", "https://example.com/feed.xml")
+    monkeypatch.setattr(one_episode, "WORDPRESS_POSTS_API_URL", "")
+
+    def fail_parse(rss_url: str) -> object:
+        raise SystemExit("RSS fetch timed out before parsing")
+
+    monkeypatch.setattr(one_episode, "_parse_rss_source", fail_parse)
+
+    with pytest.raises(SystemExit, match="RSS fetch timed out before parsing"):
+        one_episode.select_entry()
