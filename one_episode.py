@@ -373,7 +373,9 @@ def _fetch_entries_from_wordpress_posts_api(
             f"Failed to parse fallback WordPress posts API '{request_url}': expected a JSON array."
         )
     if not payload:
-        raise SystemExit(f"Fallback WordPress posts API '{request_url}' returned no posts.")
+        raise SystemExit(
+            f"Fallback WordPress posts API '{request_url}' returned no posts."
+        )
 
     return [_entry_from_wordpress_post(_to_mapping(post)) for post in payload]
 
