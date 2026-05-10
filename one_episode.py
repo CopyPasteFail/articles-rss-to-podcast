@@ -12,7 +12,9 @@ import os
 import pathlib
 import re
 import sys
-from typing import Callable, Protocol, Sequence, TypedDict
+from types import SimpleNamespace
+from typing import Any, Callable, Mapping, Protocol, Sequence, TypedDict
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import feedparser
 import requests
@@ -78,6 +80,7 @@ LANG = os.getenv("GCP_TTS_LANG", "").strip()
 RATE = float(os.getenv("GCP_TTS_RATE", "1.0"))
 PITCH = float(os.getenv("GCP_TTS_PITCH", "0.0"))
 RSS_URL = os.getenv("RSS_URL", "")
+WORDPRESS_POSTS_API_URL = os.getenv("WORDPRESS_POSTS_API_URL", "").strip()
 TARGET_LINK = os.getenv("TARGET_ENTRY_LINK", "").strip()
 TARGET_ID = os.getenv("TARGET_ENTRY_ID", "").strip()
 RSS_DEBUG_FILENAME = "last_rss.xml"
@@ -85,6 +88,7 @@ RSS_DEBUG_SNIPPET_CHARS = 400
 RSS_DEBUG_HTTP_CONNECT_TIMEOUT_S = 10.0
 RSS_DEBUG_HTTP_READ_TIMEOUT_S = 20.0
 RSS_HTTP_USER_AGENT = "tts-podcast-rss-fetcher/1.0"
+DEFAULT_WORDPRESS_POSTS_PER_PAGE = 20
 
 
 def _ensure_str(value: object, *, default: str = "") -> str:
@@ -226,6 +230,165 @@ def _parse_rss_source(
     return ParsedRssSource(parsed=feedparser.parse(rss_url), payload=None)
 
 
+def _strip_html_tags(html_value: str) -> str:
+    """Collapse a small HTML fragment into readable plain text."""
+    if not html_value:
+        return ""
+    text_without_tags = re.sub(r"<[^>]+>", " ", html_value)
+    return re.sub(r"\s+", " ", html.unescape(text_without_tags)).strip()
+
+
+def _to_mapping(value: object) -> Mapping[str, Any]:
+    """Return value as a mapping when possible."""
+    if isinstance(value, Mapping):
+        return value
+    return {}
+
+
+def _first_mapping_item(value: object) -> Mapping[str, Any]:
+    """Return the first mapping item from a list-like JSON field."""
+    if not isinstance(value, list) or not value:
+        return {}
+    return _to_mapping(value[0])
+
+
+def _build_wordpress_posts_api_url(
+    wordpress_posts_api_url: str,
+) -> str:
+    """Add stable query params to the WordPress posts API URL."""
+    parsed_url = urlsplit(wordpress_posts_api_url)
+    query_pairs = dict(parse_qsl(parsed_url.query, keep_blank_values=True))
+    query_pairs["_embed"] = "1"
+    existing_per_page_raw = query_pairs.get("per_page", "").strip()
+    if existing_per_page_raw:
+        try:
+            per_page = int(existing_per_page_raw)
+        except ValueError:
+            per_page = DEFAULT_WORDPRESS_POSTS_PER_PAGE
+        if per_page <= 0:
+            per_page = DEFAULT_WORDPRESS_POSTS_PER_PAGE
+    else:
+        per_page = DEFAULT_WORDPRESS_POSTS_PER_PAGE
+    query_pairs["per_page"] = str(per_page)
+    return urlunsplit(
+        (
+            parsed_url.scheme,
+            parsed_url.netloc,
+            parsed_url.path,
+            urlencode(query_pairs),
+            parsed_url.fragment,
+        )
+    )
+
+
+def _parse_wordpress_post_pub_utc(post: Mapping[str, Any]) -> tuple[int, ...] | None:
+    """Extract a feedparser-compatible UTC timestamp tuple from a WordPress post."""
+    for field_name in ("date_gmt", "modified_gmt", "date", "modified"):
+        raw_value = str(post.get(field_name, "")).strip()
+        if not raw_value:
+            continue
+        try:
+            parsed_datetime = datetime.datetime.fromisoformat(raw_value)
+        except ValueError:
+            continue
+        if parsed_datetime.tzinfo is None:
+            if field_name.endswith("_gmt"):
+                parsed_datetime = parsed_datetime.replace(tzinfo=datetime.timezone.utc)
+            else:
+                parsed_datetime = parsed_datetime.astimezone().astimezone(
+                    datetime.timezone.utc
+                )
+        else:
+            parsed_datetime = parsed_datetime.astimezone(datetime.timezone.utc)
+        return parsed_datetime.timetuple()[:9]
+    return None
+
+
+def _entry_from_wordpress_post(post: Mapping[str, Any]) -> SimpleNamespace:
+    """Convert a WordPress REST API post payload into a feed-entry-like object."""
+    title_html = str(_to_mapping(post.get("title")).get("rendered", "")).strip()
+    content_html = str(_to_mapping(post.get("content")).get("rendered", "")).strip()
+    excerpt_html = str(_to_mapping(post.get("excerpt")).get("rendered", "")).strip()
+    article_link = str(post.get("link", "")).strip()
+    embedded = _to_mapping(post.get("_embedded"))
+    featured_media = _first_mapping_item(embedded.get("wp:featuredmedia"))
+    author_data = _first_mapping_item(embedded.get("author"))
+
+    article_title = _strip_html_tags(title_html) or article_link or "Article"
+    article_summary = _strip_html_tags(excerpt_html)
+    if not article_summary and content_html:
+        article_summary = _strip_html_tags(content_html)
+    article_image_url = str(featured_media.get("source_url", "")).strip()
+    article_author = str(author_data.get("name", "")).strip()
+
+    return SimpleNamespace(
+        title=article_title,
+        link=article_link,
+        id=str(post.get("id", article_link)).strip(),
+        author=article_author,
+        summary=article_summary,
+        description=article_summary,
+        article_image_url=article_image_url,
+        published_parsed=_parse_wordpress_post_pub_utc(post),
+    )
+
+
+def _fetch_entries_from_wordpress_posts_api(
+    wordpress_posts_api_url: str,
+    *,
+    http_get: Callable[..., requests.Response] = requests.get,
+) -> list[SimpleNamespace]:
+    """Fetch recent entries from a WordPress REST posts endpoint."""
+    request_url = _build_wordpress_posts_api_url(wordpress_posts_api_url)
+    try:
+        response = http_get(
+            request_url,
+            headers={
+                "User-Agent": RSS_HTTP_USER_AGENT,
+                "Accept": "application/json, */*;q=0.8",
+            },
+            timeout=(
+                RSS_DEBUG_HTTP_CONNECT_TIMEOUT_S,
+                RSS_DEBUG_HTTP_READ_TIMEOUT_S,
+            ),
+        )
+        response.raise_for_status()
+    except requests.Timeout as exc:
+        raise SystemExit(
+            f"Failed to fetch fallback WordPress posts API '{request_url}': request timed out."
+        ) from exc
+    except requests.RequestException as exc:
+        raise SystemExit(
+            f"Failed to fetch fallback WordPress posts API '{request_url}': {exc}"
+        ) from exc
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise SystemExit(
+            f"Failed to parse fallback WordPress posts API '{request_url}': invalid JSON."
+        ) from exc
+    if not isinstance(payload, list):
+        raise SystemExit(
+            f"Failed to parse fallback WordPress posts API '{request_url}': expected a JSON array."
+        )
+    if not payload:
+        raise SystemExit(f"Fallback WordPress posts API '{request_url}' returned no posts.")
+
+    return [_entry_from_wordpress_post(_to_mapping(post)) for post in payload]
+
+
+def _fallback_entries_from_wordpress(reason: str) -> list[object]:
+    """Return fallback WordPress entries when a source RSS fetch or parse is unusable."""
+    if not WORDPRESS_POSTS_API_URL:
+        raise SystemExit(reason)
+    print(
+        "[warn] RSS source unavailable in one_episode; falling back to WordPress posts API "
+        f"{WORDPRESS_POSTS_API_URL}"
+    )
+    return list(_fetch_entries_from_wordpress_posts_api(WORDPRESS_POSTS_API_URL))
+
+
 def _log_feedparser_diagnostics(
     parsed: feedparser.FeedParserDict, *, entries_count: int
 ) -> None:
@@ -303,6 +466,8 @@ def feed_entry_to_meta(e: object, *, allow_fetch: bool = False) -> EntryMeta:
         html_content = text_to_html(plain_text)
     if not subtitle:
         subtitle = ""
+    if not lead_image:
+        lead_image = _ensure_str(getattr(e, "article_image_url", None))
     return EntryMeta(
         link=link,
         title=title,
@@ -317,13 +482,19 @@ def feed_entry_to_meta(e: object, *, allow_fetch: bool = False) -> EntryMeta:
 
 def select_entry() -> EntryMeta:
     """Pick the requested feed entry (or the latest) as the base article for the episode."""
-    parsed_source = _parse_rss_source(RSS_URL)
-    parsed = parsed_source["parsed"]
-    entries: list[object] = list(parsed.entries)
-    if not entries:
-        _log_feedparser_diagnostics(parsed, entries_count=0)
-        _dump_rss_debug(RSS_URL, payload=parsed_source["payload"])
-        sys.exit("RSS has no entries; see RSS debug output above")
+    try:
+        parsed_source = _parse_rss_source(RSS_URL)
+    except SystemExit as exc:
+        entries = _fallback_entries_from_wordpress(str(exc))
+    else:
+        parsed = parsed_source["parsed"]
+        entries = list(parsed.entries)
+        if not entries:
+            _log_feedparser_diagnostics(parsed, entries_count=0)
+            _dump_rss_debug(RSS_URL, payload=parsed_source["payload"])
+            entries = _fallback_entries_from_wordpress(
+                "RSS has no entries; see RSS debug output above"
+            )
 
     def matches_target(entry: object) -> bool:
         """Check whether the feed entry matches the CLI-supplied target filters."""
