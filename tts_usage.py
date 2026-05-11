@@ -23,21 +23,40 @@ from google.cloud import bigquery
 from google.cloud.bigquery.table import Row as BigQueryRow
 
 
-DEFAULT_BILLING_EXPORT_TABLE = (
-    "example-project.example_billing.gcp_billing_export_v1_FAKE123_FAKE456"
-)
 SQL_TEMPLATE_PATH = pathlib.Path(__file__).with_name("tts_usage.sql")
-BILLING_EXPORT_TABLE = os.environ.get(
-    "BILLING_EXPORT_TABLE", DEFAULT_BILLING_EXPORT_TABLE
-)
+BILLING_EXPORT_TABLE_ENV_NAME = "BILLING_EXPORT_TABLE"
+BILLING_PROJECT_ENV_NAME = "TTS_BILLING_PROJECT_ID"
 FREE_TIER_STANDARD = int(os.environ.get("FREE_TIER_STANDARD", "4000000"))
 FREE_TIER_PREMIUM = int(os.environ.get("FREE_TIER_PREMIUM", "1000000"))
 
-SQL = SQL_TEMPLATE_PATH.read_text(encoding="utf-8").format(
-    billing_export_table=BILLING_EXPORT_TABLE,
-    free_tier_premium=FREE_TIER_PREMIUM,
-    free_tier_standard=FREE_TIER_STANDARD,
-)
+
+def _billing_export_table() -> str:
+    """Return the configured fully qualified BigQuery billing export table."""
+    table_name = os.environ.get(BILLING_EXPORT_TABLE_ENV_NAME, "").strip()
+    if not table_name:
+        raise RuntimeError(
+            f"{BILLING_EXPORT_TABLE_ENV_NAME} is not set; skipping billing query"
+        )
+    return table_name
+
+
+def _billing_project_id() -> str | None:
+    """Return the project used to run the billing query."""
+    return (
+        os.environ.get(BILLING_PROJECT_ENV_NAME, "").strip()
+        or os.environ.get("GCP_PROJECT_ID", "").strip()
+        or os.environ.get("GOOGLE_CLOUD_PROJECT", "").strip()
+        or None
+    )
+
+
+def _render_sql() -> str:
+    """Render the billing SQL from current environment config."""
+    return SQL_TEMPLATE_PATH.read_text(encoding="utf-8").format(
+        billing_export_table=_billing_export_table(),
+        free_tier_premium=FREE_TIER_PREMIUM,
+        free_tier_standard=FREE_TIER_STANDARD,
+    )
 
 
 @dataclass
@@ -119,9 +138,9 @@ def _rows_from_query(result: Iterable[BigQueryRow]) -> List[UsageRow]:
 def fetch_tts_usage(client: Optional[bigquery.Client] = None) -> UsageReport:
     """Run the billing SQL so pipeline.py can update stats and CLI can print them."""
     provided_client = client is not None
-    client = client or bigquery.Client(project=os.environ.get("GOOGLE_CLOUD_PROJECT"))
+    client = client or bigquery.Client(project=_billing_project_id())
     try:
-        query_job = client.query(SQL)
+        query_job = client.query(_render_sql())
         rows = _rows_from_query(query_job.result())
     finally:
         if not provided_client:
