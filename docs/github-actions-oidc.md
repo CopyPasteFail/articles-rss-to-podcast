@@ -16,6 +16,7 @@ Repository-level GitHub variables are shared once for all pipelines:
 - `GCP_PROJECT_NUMBER`
 - `GCP_WIF_POOL_ID`
 - `GCP_WIF_PROVIDER_ID`
+- `BILLING_EXPORT_TABLE` optional, for TTS billing usage reporting
 
 Each pipeline gets one GitHub environment such as `geektime-he` or `eu-startups-en`.
 
@@ -25,6 +26,7 @@ Each environment contains variables:
 - `CF_PAGES_PROJECT`
 - `CF_KV_NAMESPACE_ID`
 - `PODCAST_MAX_RETRY_ATTEMPTS`
+- `BILLING_EXPORT_TABLE` when TTS billing usage reporting is enabled
 
 Each environment contains secrets:
 

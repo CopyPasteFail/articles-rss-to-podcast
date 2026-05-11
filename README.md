@@ -222,6 +222,23 @@ python -m tools.generate_workflow --pipeline <pipeline-id>
 
 9. Commit the pipeline config and generated workflow.
 
+
+### Optional TTS billing usage reporting
+
+TTS usage reporting reads Google Cloud Billing export data from BigQuery. Audio generation does not require this, but billing usage output needs a configured export table.
+
+For local runs, set these in `.env`:
+
+    GCP_PROJECT_ID=rss-hebrew-podcast-omer
+    BILLING_EXPORT_TABLE=rss-hebrew-podcast-omer.billing_export.gcp_billing_export_v1_010406_CE1277_E64516
+
+For GitHub Actions, set `BILLING_EXPORT_TABLE` as a repository variable. `GCP_PROJECT_ID` is already a shared repository variable.
+
+    gh variable set BILLING_EXPORT_TABLE --body "rss-hebrew-podcast-omer.billing_export.gcp_billing_export_v1_010406_CE1277_E64516"
+
+`BILLING_EXPORT_TABLE` is global for the shared GCP project, not per RSS feed.
+
+
 ## Commands
 
 ### Preflight
