@@ -422,6 +422,7 @@ FAILED_ENTRY_KEYS = (
 )
 FAILURE_STEP_GENERATE_AUDIO = "one_episode"
 RETRY_FAILED_ENV_NAME = "PODCAST_RETRY_FAILED"
+RETRY_FAILED_LIMIT_ENV_NAME = "PODCAST_RETRY_FAILED_LIMIT"
 RETRY_FAILED_VALUES = {"1", "true", "yes", "y"}
 MAX_RETRY_ATTEMPTS_ENV_NAME = "PODCAST_MAX_RETRY_ATTEMPTS"
 DEFAULT_MAX_RETRY_ATTEMPTS = 3
@@ -546,6 +547,34 @@ def _get_max_retry_attempts() -> int:
             f"using default {DEFAULT_MAX_RETRY_ATTEMPTS}"
         )
         return DEFAULT_MAX_RETRY_ATTEMPTS
+    return parsed_value
+
+
+def _get_retry_failed_limit() -> int | None:
+    """Return the max retry-exhausted entries to retry during this run.
+
+    Inputs: none (reads RETRY_FAILED_LIMIT_ENV_NAME from the environment).
+    Outputs: positive integer cap, zero, or None for unlimited retry mode.
+    Edge cases: invalid or blank values fall back to unlimited retry mode.
+    """
+
+    raw_value = os.getenv(RETRY_FAILED_LIMIT_ENV_NAME, "").strip()
+    if not raw_value:
+        return None
+    try:
+        parsed_value = int(raw_value)
+    except ValueError:
+        print(
+            f"[warn] Invalid {RETRY_FAILED_LIMIT_ENV_NAME}={raw_value!r}; "
+            "retrying all failed entries"
+        )
+        return None
+    if parsed_value < 0:
+        print(
+            f"[warn] Negative {RETRY_FAILED_LIMIT_ENV_NAME}={parsed_value}; "
+            "retrying all failed entries"
+        )
+        return None
     return parsed_value
 
 
@@ -1101,6 +1130,8 @@ def main() -> None:
     processed = False
     run_characters = 0
     retry_failed_entries = _is_retry_failed_enabled()
+    retry_failed_limit = _get_retry_failed_limit()
+    retried_exhausted_entries = 0
     max_retry_attempts = _get_max_retry_attempts()
     attempted_entries = 0
     exhausted_entries = 0
@@ -1182,6 +1213,17 @@ def main() -> None:
             )
             print(f"  → Set {RETRY_FAILED_ENV_NAME}=1 to retry this entry")
             continue
+        if retry_failed_entries and retry_exhausted:
+            if (
+                retry_failed_limit is not None
+                and retried_exhausted_entries >= retry_failed_limit
+            ):
+                print(
+                    "  → Skipping retry-exhausted entry because "
+                    f"{RETRY_FAILED_LIMIT_ENV_NAME}={retry_failed_limit} was reached"
+                )
+                continue
+            retried_exhausted_entries += 1
 
         if ia_present and last_pub == entry["article_pub_utc"] and already_in_feed:
             print("  → Skipping (already processed)")
