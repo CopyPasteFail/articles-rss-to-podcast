@@ -106,7 +106,7 @@ def test_select_entry_falls_back_to_wordpress_posts_api_after_rss_timeout(
     monkeypatch.setattr(
         one_episode,
         "resolve_article_content",
-        lambda entry, link, allow_fetch: (
+        lambda entry, link, allow_fetch, article_title=None: (
             entry.summary,
             "<p>Fallback article body</p>",
             "",

@@ -949,7 +949,7 @@ def _entry_from_feed(e: Any) -> EntryDict:
     link = getattr(e, "link", None) or getattr(e, "id", None)
     title = getattr(e, "title", link)
     plain_text, html_content, subtitle, lead_image = resolve_article_content(
-        e, link, allow_fetch=False
+        e, link, allow_fetch=False, article_title=title
     )
     summary = (
         plain_text or getattr(e, "summary", "") or getattr(e, "description", "") or ""

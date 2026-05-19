@@ -456,7 +456,7 @@ def feed_entry_to_meta(e: object, *, allow_fetch: bool = False) -> EntryMeta:
     else:
         pub_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
     plain_text, html_content, subtitle, lead_image = resolve_article_content(
-        e, link, allow_fetch=allow_fetch
+        e, link, allow_fetch=allow_fetch, article_title=title
     )
     if not plain_text:
         plain_text = (

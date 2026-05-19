@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import html as _html
 import re
+import string
+import unicodedata
 from collections.abc import Iterable
 from typing import Any, Callable, Mapping, TypeVar, cast
 from urllib.parse import urljoin, urlsplit
@@ -20,6 +22,7 @@ _WHITESPACE_RE = re.compile(r"[ \t]+")
 _MULTI_NEWLINE_RE = re.compile(r"\n{3,}")
 _URL_ONLY_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 _WORDPRESS_FOOTER_RE = re.compile(r"the post .+ appeared first on", re.IGNORECASE)
+_PUNCTUATION_TRANSLATION = str.maketrans("", "", string.punctuation)
 
 _FeedMapping = Mapping[str, Any]
 _SeqItem = TypeVar("_SeqItem")
@@ -107,11 +110,115 @@ _MEDIA_TAGS = (
 )
 _HEADING_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6")
 _SUBTITLE_TAGS = ("h2", "h3", "h4")
+_BODY_BLOCK_TAGS = ("p", "div", "section", "article", *_HEADING_TAGS)
 
 
 def _remove_footer_lines(lines: Iterable[str]) -> list[str]:
     """Filter out footer-looking lines from plain text snippets."""
     return [line for line in lines if not _looks_like_footer(line)]
+
+
+def _normalize_for_title_comparison(text: str) -> str:
+    """Normalize text so extracted body text can be compared with an entry title.
+
+    Inputs: a title or candidate first body line.
+    Outputs: lower-case text with HTML entities decoded, Unicode forms normalized,
+    ASCII punctuation removed, and whitespace collapsed.
+    Edge cases: Hebrew punctuation and mirrored quote variants are normalized by
+    Unicode category rather than by an English-only punctuation list.
+    Atomicity or concurrency guarantees: pure function with no shared state.
+    """
+
+    decoded_text = _html.unescape(text)
+    normalized_text = unicodedata.normalize("NFKC", decoded_text)
+    ascii_without_punctuation = normalized_text.translate(_PUNCTUATION_TRANSLATION)
+    without_unicode_punctuation = "".join(
+        character
+        for character in ascii_without_punctuation
+        if not unicodedata.category(character).startswith("P")
+    )
+    return re.sub(r"\s+", " ", without_unicode_punctuation).strip().casefold()
+
+
+def _matches_entry_title(candidate_text: str, article_title: str | None) -> bool:
+    """Return whether a body fragment is the same title already stored on the entry.
+
+    Inputs: candidate text from the start of the extracted body and the entry title.
+    Outputs: True only when both normalize to the same non-empty value.
+    Edge cases: whitespace, HTML entities, quote variants, and punctuation-only
+    differences are ignored so feeds can vary formatting without duplicating speech.
+    Atomicity or concurrency guarantees: pure function with no shared state.
+    """
+
+    if not candidate_text or not article_title:
+        return False
+    normalized_candidate_text = _normalize_for_title_comparison(candidate_text)
+    normalized_article_title = _normalize_for_title_comparison(article_title)
+    return bool(
+        normalized_candidate_text
+        and normalized_article_title
+        and normalized_candidate_text == normalized_article_title
+    )
+
+
+def _strip_leading_duplicate_title_from_text(
+    plain_text: str, article_title: str | None
+) -> str:
+    """Remove the first body line only when it repeats the entry title.
+
+    Inputs: extracted plain article text and the title supplied by the RSS entry.
+    Outputs: the original text unless the first non-empty line matches the title.
+    Edge cases: preserves the rest of the first paragraph when the duplicate title
+    is followed by subtitle/body lines, and preserves all content when there is no
+    title match.
+    Atomicity or concurrency guarantees: pure function with no shared state.
+    """
+
+    if not plain_text or not article_title:
+        return plain_text
+
+    lines = plain_text.splitlines()
+    first_content_index = next(
+        (line_index for line_index, line in enumerate(lines) if line.strip()),
+        None,
+    )
+    if first_content_index is None:
+        return plain_text
+
+    if not _matches_entry_title(lines[first_content_index], article_title):
+        return plain_text
+
+    remaining_lines = lines[:first_content_index] + lines[first_content_index + 1 :]
+    return "\n".join(remaining_lines).strip()
+
+
+def _strip_leading_duplicate_title_from_html(
+    html_content: str, article_title: str | None
+) -> str:
+    """Remove a leading HTML block only when it duplicates the entry title.
+
+    Inputs: normalized or source HTML for an article body and the entry title.
+    Outputs: the original HTML unless its first meaningful block contains only the
+    duplicated title.
+    Edge cases: intentionally does not edit a paragraph that contains title plus
+    additional body text, because that could discard real article content.
+    Atomicity or concurrency guarantees: pure function with no shared state.
+    """
+
+    if not html_content or not article_title:
+        return html_content
+
+    soup = BeautifulSoup(html_content, "lxml")
+    body = soup.body or soup
+    for element in body.find_all(_BODY_BLOCK_TAGS):
+        element_text = element.get_text(" ", strip=True)
+        if not element_text:
+            continue
+        if _matches_entry_title(element_text, article_title):
+            element.decompose()
+            return str(body.decode_contents()).strip()
+        return html_content
+    return html_content
 
 
 def _strip_embedded_media(soup: BeautifulSoup) -> None:
@@ -304,22 +411,36 @@ def resolve_article_content(
     *,
     allow_fetch: bool = False,
     min_words: int = 80,
+    article_title: str | None = None,
 ) -> tuple[str, str, str, str]:
     """Return (plain_text, html_content, subtitle, lead_image_url) for the entry.
 
     When ``allow_fetch`` is True and the feed-provided content is short, we
-    attempt to download the full article using ``trafilatura``.
+    attempt to download the full article using ``trafilatura``. When
+    ``article_title`` is provided, a matching first body line is removed so the
+    title is not repeated in generated audio or podcast descriptions.
     """
 
     html_content = _get_entry_content_html(entry)
     plain_text, subtitle, lead_image = html_to_text(html_content, base_url=link or "")
+    if _matches_entry_title(subtitle, article_title):
+        subtitle = ""
+    plain_text = _strip_leading_duplicate_title_from_text(plain_text, article_title)
     normalized_html = text_to_html(plain_text)
+    normalized_html = _strip_leading_duplicate_title_from_html(
+        normalized_html, article_title
+    )
 
     if allow_fetch and link and _word_count(plain_text) < max(20, min_words):
         fetched_text = fetch_article_text(link)
         if fetched_text:
-            plain_text = fetched_text
-            normalized_html = text_to_html(fetched_text)
+            plain_text = _strip_leading_duplicate_title_from_text(
+                fetched_text, article_title
+            )
+            normalized_html = text_to_html(plain_text)
+            normalized_html = _strip_leading_duplicate_title_from_html(
+                normalized_html, article_title
+            )
             subtitle = ""
             if not lead_image:
                 # Try to re-extract from fetched content if available via html
