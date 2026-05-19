@@ -85,7 +85,9 @@ def test_resolve_article_content_matches_title_with_punctuation_variants() -> No
     """
 
     article_title = "יש תאריך ל-WWDC 2026?"
-    entry = build_entry("<p>יש תאריך ל-WWDC 2026</p><p>אפל הודיעה על תאריכי הכנס.</p>")
+    entry = build_entry(
+        "<p>יש תאריך ל-WWDC 2026</p><p>אפל הודיעה על תאריכי הכנס.</p>"
+    )
 
     plain_text, html_content, _subtitle, _lead_image_url = resolve_article_content(
         entry,
@@ -107,7 +109,9 @@ def test_resolve_article_content_drops_duplicate_title_subtitle() -> None:
     """
 
     article_title = "כותרת שחוזרת ככותרת משנה"
-    entry = build_entry("<h2>כותרת שחוזרת ככותרת משנה</h2><p>גוף הכתבה מתחיל כאן.</p>")
+    entry = build_entry(
+        "<h2>כותרת שחוזרת ככותרת משנה</h2><p>גוף הכתבה מתחיל כאן.</p>"
+    )
 
     plain_text, _html_content, subtitle, _lead_image_url = resolve_article_content(
         entry,
