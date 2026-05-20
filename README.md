@@ -36,8 +36,10 @@ Each pipeline gets its own GitHub environment, for example `geektime-he` or `eu-
 Each environment contains variables:
 
 - `GCP_SERVICE_ACCOUNT_EMAIL`
+- `CLOUDFLARE_ACCOUNT_ID`
 - `CF_PAGES_PROJECT`
 - `CF_KV_NAMESPACE_ID`
+- `IA_ID_PREFIX`
 - `PODCAST_MAX_RETRY_ATTEMPTS`
 
 Each environment contains secrets:
