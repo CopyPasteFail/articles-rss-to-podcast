@@ -49,7 +49,7 @@ def get_project_roles_for_service_account(
         cwd=pipeline_config.repo_root,
     )
     if not isinstance(policy, dict):
-        raise RuntimeError("Unexpected project IAM policy payload.")
+        raise RuntimeError("Unexpected project IAM policy payload.")  # noqa: TRY004
 
     current_roles: set[str] = set()
     for binding in policy.get("bindings", []):
@@ -118,7 +118,7 @@ def get_service_account_policy(
         cwd=pipeline_config.repo_root,
     )
     if not isinstance(policy, dict):
-        raise RuntimeError("Unexpected service account IAM policy payload.")
+        raise RuntimeError("Unexpected service account IAM policy payload.")  # noqa: TRY004
     return policy
 
 
@@ -155,9 +155,7 @@ def remove_unexpected_workload_identity_members(
                 continue
             if member == expected_member:
                 continue
-            if member.startswith(pool_principal_prefix) or member.startswith(
-                pool_principal_set_prefix
-            ):
+            if member.startswith((pool_principal_prefix, pool_principal_set_prefix)):
                 run_command(
                     [
                         "gcloud",

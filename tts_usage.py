@@ -7,12 +7,7 @@ import pathlib
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import (
-    Any,
-    TypedDict,
-    Union,
-    cast,
-)
+from typing import Any, TypedDict, cast
 
 from google.cloud import bigquery
 from google.cloud.bigquery.table import Row as BigQueryRow
@@ -97,7 +92,7 @@ _EMPTY_SUMMARY: UsageSummary = {"characters": 0, "free_tier_remaining": 0}
 _EMPTY_GROUPS: tuple[UsageGroup, ...] = ()
 _EMPTY_DAILY: tuple[UsageDaily, ...] = ()
 
-Numeric = Union[int, float, Decimal]
+Numeric = int | float | Decimal
 
 
 def _int_or_zero(value: Numeric | None) -> int:

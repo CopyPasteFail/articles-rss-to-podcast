@@ -89,6 +89,7 @@ def run_command(
         cwd=str(cwd) if cwd else None,
         capture_output=True,
         text=True,
+        check=False,
     )  # nosec B603
     output = "\n".join(
         part for part in (completed.stdout.strip(), completed.stderr.strip()) if part
@@ -276,7 +277,7 @@ def resolve_cloudflare_kv_namespace_id(
         )
         response.raise_for_status()
         payload = response.json()
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
     results = payload.get("result")

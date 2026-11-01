@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """Reset a single episode so the pipeline can regenerate/upload it from scratch.
 
 Removes the local MP3/sidecar, drops the entry from Cloudflare KV, and leaves the
@@ -52,7 +51,7 @@ def cleanup_local(
         try:
             with sidecar.open("r", encoding="utf-8") as f:
                 meta = cast(dict[str, Any], json.load(f))
-        except Exception:
+        except Exception:  # noqa: BLE001
             meta = None
         if meta is None:
             continue
@@ -82,8 +81,8 @@ def cleanup_local(
             hash_sidecar.resolve(), dry_run=dry_run
         ):
             removed.append(str(hash_sidecar.resolve()))
-    except Exception:
-        removed = removed
+    except Exception:  # noqa: BLE001
+        pass
 
     return removed
 

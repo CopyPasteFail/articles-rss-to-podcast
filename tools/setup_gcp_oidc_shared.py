@@ -204,7 +204,7 @@ def describe_provider_configuration(
             return None
         raise
     if not isinstance(payload, dict):
-        raise RuntimeError("Unexpected Workload Identity Provider description payload.")
+        raise RuntimeError("Unexpected Workload Identity Provider description payload.")  # noqa: TRY004
     return payload
 
 

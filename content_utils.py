@@ -7,14 +7,14 @@ import re
 import string
 import unicodedata
 from collections.abc import Callable, Iterable, Mapping
-from typing import Any, TypeVar, cast
+from typing import Any, cast
 from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 
 try:  # Optional dependency during unit tests
     import trafilatura
-except Exception:  # pragma: no cover - best effort import
+except Exception:  # noqa: BLE001  # pragma: no cover - best effort import
     trafilatura = None
 
 
@@ -25,7 +25,6 @@ _WORDPRESS_FOOTER_RE = re.compile(r"the post .+ appeared first on", re.IGNORECAS
 _PUNCTUATION_TRANSLATION = str.maketrans("", "", string.punctuation)
 
 _FeedMapping = Mapping[str, Any]
-_SeqItem = TypeVar("_SeqItem")
 
 
 def _coerce_str(value: Any) -> str | None:
@@ -51,7 +50,7 @@ def _extract_value_field(data: Any) -> str | None:
     return None
 
 
-def _coerce_sequence(
+def _coerce_sequence[_SeqItem](
     value: _SeqItem | list[_SeqItem] | tuple[_SeqItem, ...] | None,
 ) -> list[_SeqItem]:
     """Turn lone values into lists so image scanning code can iterate safely."""
@@ -92,9 +91,7 @@ def _looks_like_footer(line: str) -> bool:
         return True
     if low.startswith("appeared first on"):
         return True
-    if low in {"גיקטיים", "geektime", "appeared first on", "the post"}:
-        return True
-    return False
+    return low in {"גיקטיים", "geektime", "appeared first on", "the post"}
 
 
 _MEDIA_TAGS = (
@@ -380,7 +377,7 @@ def fetch_article_text(url: str) -> str:
         if not extracted:
             return ""
         return _normalize_text_block(extracted)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return ""
 
 

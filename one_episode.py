@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """Create a single podcast episode MP3 from a chosen RSS article."""
 
 from __future__ import annotations
@@ -122,7 +121,7 @@ def _describe_rss_source(rss_url: str) -> str:
 def _looks_like_html(payload_text: str) -> bool:
     """Detect obvious HTML payloads that are masquerading as RSS/Atom feeds."""
     stripped = payload_text.lstrip().lower()
-    if stripped.startswith("<!doctype html") or stripped.startswith("<html"):
+    if stripped.startswith(("<!doctype html", "<html")):
         return True
     return "<html" in stripped[:600]
 
@@ -172,7 +171,7 @@ def _read_rss_payload_for_debug(
             )
             response.raise_for_status()
             return response.content
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             print(f"RSS debug: failed to fetch RSS_URL over HTTP: {exc}")
             return None
 
@@ -501,9 +500,7 @@ def select_entry() -> EntryMeta:
         entry_id = _ensure_str(getattr(entry, "id", None))
         if TARGET_LINK and link == TARGET_LINK:
             return True
-        if TARGET_ID and entry_id == TARGET_ID:
-            return True
-        return False
+        return bool(TARGET_ID and entry_id == TARGET_ID)
 
     target = next((entry for entry in entries if matches_target(entry)), None)
     if not target:
@@ -692,7 +689,7 @@ def main() -> None:
     e = select_entry()
     # filename: <YYYYMMDD-HHMMSS>-<slug(title or path)>
     dt = datetime.datetime.fromisoformat(
-        e["pub_utc"].replace("Z", "+00:00")
+        e["pub_utc"]
     ).astimezone(datetime.UTC)
     ts = dt.strftime("%Y%m%d-%H%M%S")
     slug = slugify(e["link"] or e["title"])

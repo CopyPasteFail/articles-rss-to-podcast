@@ -62,7 +62,7 @@ def generate_workflow_yaml(pipeline_config: PipelineConfig) -> str:
         ]
     )
 
-    runtime_env_lines = "\n".join(
+    runtime_env_lines = "\n".join(  # noqa: FLY002
         [
             "          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}",
             "          CF_PAGES_PROJECT: ${{ vars.CF_PAGES_PROJECT }}",
