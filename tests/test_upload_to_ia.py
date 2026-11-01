@@ -109,7 +109,9 @@ def test_get_ia_session_falls_back_without_logging_local_config_source(
     assert "default IA config" not in output
 
 
-def test_upload_timeout_configuration(monkeypatch: Any, upload_to_ia_module: Any) -> None:
+def test_upload_timeout_configuration(
+    monkeypatch: Any, upload_to_ia_module: Any
+) -> None:
     monkeypatch.delenv("IA_UPLOAD_TIMEOUT", raising=False)
     assert upload_to_ia_module.ia_upload_request_kwargs()["timeout"] == (15.0, 120.0)
 
@@ -140,7 +142,10 @@ def test_timeout_with_matching_remote_checksum_is_success(
     kwargs = {"timeout": (15.0, 120.0)}
     item = types.SimpleNamespace(upload=upload)
     responses = upload_to_ia_module.upload_with_retries(
-        item, {"episode.mp3": str(mp3)}, metadata={}, max_attempts=3,
+        item,
+        {"episode.mp3": str(mp3)},
+        metadata={},
+        max_attempts=3,
         request_kwargs=kwargs,
         confirm_upload=lambda: upload_to_ia_module.remote_upload_matches(
             session, "article-id", "episode.mp3", mp3, request_kwargs=kwargs
@@ -175,7 +180,9 @@ def test_timeout_with_mismatched_remote_checksum_retries(
     kwargs = {"timeout": (15.0, 120.0)}
     responses = upload_to_ia_module.upload_with_retries(
         types.SimpleNamespace(upload=upload),
-        {"episode.mp3": str(mp3)}, metadata={}, max_attempts=3,
+        {"episode.mp3": str(mp3)},
+        metadata={},
+        max_attempts=3,
         request_kwargs=kwargs,
         confirm_upload=lambda: upload_to_ia_module.remote_upload_matches(
             session, "article-id", "episode.mp3", mp3, request_kwargs=kwargs
@@ -208,7 +215,9 @@ def test_failed_metadata_check_does_not_hide_upload_timeout(
     with pytest.raises(requests.exceptions.ReadTimeout, match="upload unavailable"):
         upload_to_ia_module.upload_with_retries(
             types.SimpleNamespace(upload=upload),
-            {"episode.mp3": str(mp3)}, metadata={}, max_attempts=2,
+            {"episode.mp3": str(mp3)},
+            metadata={},
+            max_attempts=2,
             request_kwargs=kwargs,
             confirm_upload=lambda: upload_to_ia_module.remote_upload_matches(
                 session, "article-id", "episode.mp3", mp3, request_kwargs=kwargs
