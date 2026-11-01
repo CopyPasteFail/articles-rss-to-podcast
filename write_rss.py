@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """Build and update the podcast RSS feed after each successful upload."""
 
 from __future__ import annotations
@@ -130,7 +129,7 @@ def get_len(url: str) -> int | None:
         response = requests.head(url, allow_redirects=True, timeout=15)
         value = response.headers.get("Content-Length")
         return int(value) if value and value.isdigit() else None
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -217,7 +216,7 @@ def _existing_item_matches_episode(
             episode_payload["article_pub_utc"]
         ).astimezone(ZoneInfo("Asia/Jerusalem"))
         expected_pub_date = rfc2822(pub_date)
-    except Exception:
+    except Exception:  # noqa: BLE001
         expected_pub_date = ""
 
     return bool(
@@ -329,7 +328,7 @@ def add_item(
 
     try:
         pub_dt = datetime.datetime.fromisoformat(ep["article_pub_utc"])
-    except Exception:
+    except Exception:  # noqa: BLE001
         pub_dt = datetime.datetime.now(ZoneInfo("Asia/Jerusalem"))
     fe.pubDate(rfc2822(pub_dt.astimezone(ZoneInfo("Asia/Jerusalem"))))
 

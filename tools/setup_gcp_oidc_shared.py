@@ -15,7 +15,6 @@ from tools.command_utils import (
 )
 from tools.pipeline_config import PipelineConfig, load_pipeline_config
 
-
 EXPECTED_PROVIDER_ISSUER_URI = "https://token.actions.githubusercontent.com"
 REQUIRED_GOOGLE_SERVICE_NAMES = ("iamcredentials.googleapis.com",)
 PROVIDER_ATTRIBUTE_MAPPING = {
@@ -205,7 +204,7 @@ def describe_provider_configuration(
             return None
         raise
     if not isinstance(payload, dict):
-        raise RuntimeError("Unexpected Workload Identity Provider description payload.")
+        raise RuntimeError("Unexpected Workload Identity Provider description payload.")  # noqa: TRY004
     return payload
 
 

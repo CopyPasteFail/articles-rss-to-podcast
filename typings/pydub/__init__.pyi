@@ -1,9 +1,7 @@
 """Minimal pydub type hints used by the RSS-to-podcast pipeline."""
 
-from __future__ import annotations
-
 from os import PathLike
-from typing import Any, IO
+from typing import IO, Any
 
 class AudioSegment:
     frame_rate: int
@@ -11,7 +9,7 @@ class AudioSegment:
     sample_width: int
 
     def __init__(self, *args: Any, **kwargs: Any) -> None: ...
-    def __add__(self, other: "AudioSegment") -> "AudioSegment": ...
+    def __add__(self, other: AudioSegment) -> AudioSegment: ...
     @classmethod
     def from_file(
         cls,
@@ -22,7 +20,7 @@ class AudioSegment:
         start_second: float | None = ...,
         duration: float | None = ...,
         **kwargs: Any,
-    ) -> "AudioSegment": ...
+    ) -> AudioSegment: ...
     def export(
         self,
         out_f: str | PathLike[str] | IO[bytes],

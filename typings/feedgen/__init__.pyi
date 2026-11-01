@@ -1,3 +1,3 @@
 from .feed import FeedEntry, FeedGenerator
 
-__all__ = ["FeedGenerator", "FeedEntry"]
+__all__ = ["FeedEntry", "FeedGenerator"]

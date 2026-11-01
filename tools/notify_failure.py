@@ -10,7 +10,6 @@ import ssl
 import sys
 from email.message import EmailMessage
 
-
 LOG_TAIL_LINE_COUNT = 80
 
 

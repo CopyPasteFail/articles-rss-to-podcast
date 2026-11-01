@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """Create a single podcast episode MP3 from a chosen RSS article."""
 
 from __future__ import annotations
@@ -12,8 +11,9 @@ import os
 import pathlib
 import re
 import sys
+from collections.abc import Callable, Mapping, Sequence
 from types import SimpleNamespace
-from typing import Any, Callable, Mapping, Protocol, Sequence, TypedDict
+from typing import Any, Protocol, TypedDict
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import feedparser
@@ -121,7 +121,7 @@ def _describe_rss_source(rss_url: str) -> str:
 def _looks_like_html(payload_text: str) -> bool:
     """Detect obvious HTML payloads that are masquerading as RSS/Atom feeds."""
     stripped = payload_text.lstrip().lower()
-    if stripped.startswith("<!doctype html") or stripped.startswith("<html"):
+    if stripped.startswith(("<!doctype html", "<html")):
         return True
     return "<html" in stripped[:600]
 
@@ -171,7 +171,7 @@ def _read_rss_payload_for_debug(
             )
             response.raise_for_status()
             return response.content
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             print(f"RSS debug: failed to fetch RSS_URL over HTTP: {exc}")
             return None
 
@@ -293,13 +293,11 @@ def _parse_wordpress_post_pub_utc(post: Mapping[str, Any]) -> tuple[int, ...] | 
             continue
         if parsed_datetime.tzinfo is None:
             if field_name.endswith("_gmt"):
-                parsed_datetime = parsed_datetime.replace(tzinfo=datetime.timezone.utc)
+                parsed_datetime = parsed_datetime.replace(tzinfo=datetime.UTC)
             else:
-                parsed_datetime = parsed_datetime.astimezone().astimezone(
-                    datetime.timezone.utc
-                )
+                parsed_datetime = parsed_datetime.astimezone().astimezone(datetime.UTC)
         else:
-            parsed_datetime = parsed_datetime.astimezone(datetime.timezone.utc)
+            parsed_datetime = parsed_datetime.astimezone(datetime.UTC)
         return parsed_datetime.timetuple()[:9]
     return None
 
@@ -450,11 +448,9 @@ def feed_entry_to_meta(e: object, *, allow_fetch: bool = False) -> EntryMeta:
         author = _ensure_str(getattr(e, "creator", None))
     tstruct = getattr(e, "published_parsed", None) or getattr(e, "updated_parsed", None)
     if tstruct:
-        pub_utc = datetime.datetime(
-            *tstruct[:6], tzinfo=datetime.timezone.utc
-        ).isoformat()
+        pub_utc = datetime.datetime(*tstruct[:6], tzinfo=datetime.UTC).isoformat()
     else:
-        pub_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        pub_utc = datetime.datetime.now(datetime.UTC).isoformat()
     plain_text, html_content, subtitle, lead_image = resolve_article_content(
         e, link, allow_fetch=allow_fetch, article_title=title
     )
@@ -504,9 +500,7 @@ def select_entry() -> EntryMeta:
         entry_id = _ensure_str(getattr(entry, "id", None))
         if TARGET_LINK and link == TARGET_LINK:
             return True
-        if TARGET_ID and entry_id == TARGET_ID:
-            return True
-        return False
+        return bool(TARGET_ID and entry_id == TARGET_ID)
 
     target = next((entry for entry in entries if matches_target(entry)), None)
     if not target:
@@ -694,9 +688,7 @@ def main() -> None:
     print(f"RSS source (RSS_URL): {_describe_rss_source(RSS_URL)}")
     e = select_entry()
     # filename: <YYYYMMDD-HHMMSS>-<slug(title or path)>
-    dt = datetime.datetime.fromisoformat(
-        e["pub_utc"].replace("Z", "+00:00")
-    ).astimezone(datetime.timezone.utc)
+    dt = datetime.datetime.fromisoformat(e["pub_utc"]).astimezone(datetime.UTC)
     ts = dt.strftime("%Y%m%d-%H%M%S")
     slug = slugify(e["link"] or e["title"])
     mp3_name = f"{ts}-{slug}.mp3"

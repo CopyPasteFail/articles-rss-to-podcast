@@ -12,7 +12,6 @@ import yaml
 
 from tools.command_utils import ensure_repo_relative_path
 
-
 CONFIG_SEARCH_SUFFIXES = (".yaml", ".yml", ".json")
 LOCAL_CONFIG_SUFFIX = ".local"
 SHARED_PIPELINE_CONFIG_BASENAME = "shared"

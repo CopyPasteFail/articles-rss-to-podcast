@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """Load feed-specific env vars then run the full RSS-to-podcast pipeline."""
 
 import os
@@ -14,7 +13,7 @@ def main():
     """Entry point for operators: pick a slug, load .env files, run pipeline.py."""
     try:
         sys.stdout.reconfigure(line_buffering=True)
-    except Exception:
+    except Exception:  # noqa: BLE001
         sys.stdout = sys.stdout
     os.environ.setdefault("PYTHONUNBUFFERED", "1")
     if len(sys.argv) != 2:
@@ -41,7 +40,7 @@ def main():
         pipeline.main()
     except SystemExit:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         sys.exit(f"Pipeline failed: {exc}")
 
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """Upload generated MP3s to Internet Archive and print the public download URL."""
 
 from __future__ import annotations
@@ -335,7 +334,7 @@ def main() -> None:
 
     try:
         replacing = any(f.name == remote_name for f in item.get_files())
-    except Exception:
+    except Exception:  # noqa: BLE001
         replacing = False
     print(f"{'Replacing' if replacing else 'Creating'} {remote_name} in {identifier}\n")
 

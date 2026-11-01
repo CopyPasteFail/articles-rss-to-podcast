@@ -30,13 +30,12 @@ from tools.pipeline_config import (
 )
 from tools.setup_gcp_oidc_shared import (
     REQUIRED_GOOGLE_SERVICE_NAMES,
-    describe_provider_configuration,
-    get_missing_required_google_service_names,
-    get_expected_provider_configuration,
     _read_provider_issuer_uri,
+    describe_provider_configuration,
+    get_expected_provider_configuration,
+    get_missing_required_google_service_names,
 )
 from tools.setup_gcp_pipeline_sa import build_workload_identity_member
-
 
 EXIT_OK = 0
 EXIT_MISSING = 10
@@ -126,12 +125,12 @@ def print_preflight_report(
         "Config: "
         f"{pipeline_config.config_path.relative_to(pipeline_config.repo_root).as_posix()}"
     )
-    print("")
+    print()
     for check_result in check_results:
         print(f"[{check_result.status}] {check_result.name}: {check_result.detail}")
 
     exit_code = summarize_exit_code(check_results)
-    print("")
+    print()
     print(
         "Summary: "
         f"{sum(1 for check_result in check_results if check_result.status == 'PASS')} PASS, "

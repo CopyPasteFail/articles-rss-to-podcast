@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """End-to-end pipeline that turns an RSS feed into fully hosted podcast episodes."""
 
 from __future__ import annotations
@@ -7,17 +6,17 @@ import datetime
 import hashlib
 import html
 import importlib
+import io
 import json
 import os
 import pathlib
-import re
 import random
+import re
 import shutil
 import subprocess  # nosec B404
 import sys
 import tempfile
 import time
-import io
 from collections.abc import Mapping
 from typing import Any, Protocol, TypedDict, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -28,7 +27,7 @@ try:
     stdout = sys.stdout
     if isinstance(stdout, io.TextIOWrapper):
         stdout.reconfigure(line_buffering=True)
-except Exception:
+except Exception:  # noqa: BLE001
     stdout = sys.stdout
 
 from content_utils import resolve_article_content, text_to_html
@@ -126,8 +125,7 @@ def _fetch_rss_payload(
     except requests.Timeout:
         return (
             None,
-            f"Failed to fetch {source_feed_context}: request timed out while waiting for the "
-            "origin server response.",
+            f"Failed to fetch {source_feed_context}: request timed out while waiting for the origin server response.",
         )
     except requests.RequestException as exc:
         return None, f"Failed to fetch {source_feed_context} before parsing: {exc}"
@@ -155,10 +153,10 @@ def _payload_looks_like_html(payload: bytes) -> bool:
     """Return True when the RSS payload appears to be HTML instead of XML."""
     try:
         text = payload.decode("utf-8", errors="replace")
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
     snippet = text.lstrip()[:200].lower()
-    return snippet.startswith("<!doctype html") or snippet.startswith("<html")
+    return snippet.startswith(("<!doctype html", "<html"))
 
 
 def _build_wordpress_posts_api_url(
@@ -260,15 +258,13 @@ def _parse_wordpress_post_pub_utc(post: Mapping[str, Any]) -> str:
             continue
         if parsed_datetime.tzinfo is None:
             if field_name.endswith("_gmt"):
-                parsed_datetime = parsed_datetime.replace(tzinfo=datetime.timezone.utc)
+                parsed_datetime = parsed_datetime.replace(tzinfo=datetime.UTC)
             else:
-                parsed_datetime = parsed_datetime.astimezone().astimezone(
-                    datetime.timezone.utc
-                )
+                parsed_datetime = parsed_datetime.astimezone().astimezone(datetime.UTC)
         else:
-            parsed_datetime = parsed_datetime.astimezone(datetime.timezone.utc)
+            parsed_datetime = parsed_datetime.astimezone(datetime.UTC)
         return parsed_datetime.isoformat()
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+    return datetime.datetime.now(datetime.UTC).isoformat()
 
 
 def _entry_from_wordpress_post(post: Mapping[str, Any]) -> EntryDict:
@@ -692,7 +688,7 @@ def _record_entry_failure(
     Edge cases: empty message or timestamps; caller is responsible for persistence.
     Atomicity: not thread-safe; caller must persist in KV after mutation.
     """
-    failure_timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    failure_timestamp = datetime.datetime.now(datetime.UTC).isoformat()
     previous_attempt_count = int(
         entry_state.get(FAILED_ENTRY_ATTEMPT_COUNT_KEY, 0) or 0
     )
@@ -747,7 +743,7 @@ def git_info() -> tuple[str | None, str | None]:
         branch = sh("git", "rev-parse", "--abbrev-ref", "HEAD", cwd=str(ROOT)).strip()
         commit = sh("git", "rev-parse", "HEAD", cwd=str(ROOT)).strip()
         return branch, commit
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None, None
 
 
@@ -828,7 +824,7 @@ def kv_get(key: str) -> JSONDict | None:
             return None
         print(f"[kv] GET {key} -> {r.status_code}")
         return None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"[kv] GET error: {e}")
         return None
 
@@ -841,10 +837,9 @@ def kv_put_via_wrangler(key: str, data: JSONDict) -> bool:
 
     tmp_path: str | None = None
     try:
-        tmp = tempfile.NamedTemporaryFile(
+        with tempfile.NamedTemporaryFile(
             "w", delete=False, suffix=".json", encoding="utf-8"
-        )
-        with tmp:
+        ) as tmp:
             json.dump(data, tmp, ensure_ascii=False)
             tmp_path = tmp.name
 
@@ -863,19 +858,19 @@ def kv_put_via_wrangler(key: str, data: JSONDict) -> bool:
         ]
         print(f"[kv] Falling back to wrangler for {key} (namespace {ns_id})")
         resolved_cmd = _prepare_subprocess_command(tuple(cmd))
-        proc = subprocess.run(resolved_cmd, capture_output=True, text=True)  # nosec B603
+        proc = subprocess.run(resolved_cmd, capture_output=True, text=True, check=False)  # nosec B603
         if proc.returncode == 0:
             print(f"[kv] Wrangler PUT {key} ok")
             return True
         err_out = proc.stderr.strip() or proc.stdout.strip()
         print(f"[kv] Wrangler put failed ({proc.returncode}): {err_out}")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"[kv] Wrangler put error: {e}")
     finally:
         if tmp_path:
             try:
                 os.unlink(tmp_path)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 tmp_path = ""
     return False
 
@@ -901,7 +896,7 @@ def kv_put(key: str, data: JSONDict) -> bool:
                 print(f"[kv] PUT {key} ok (attempt {attempt}, timeout={timeout}s)")
                 return True
             print(f"[kv] PUT {key} -> {r.status_code} {r.text[:200]}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"[kv] PUT error attempt {attempt}/{attempts}: {e}")
 
         if attempt < attempts:
@@ -939,7 +934,7 @@ def ia_has_episode_http(identifier: str) -> bool:
     try:
         r = requests.head(url, allow_redirects=True, timeout=10)
         return r.status_code == 200
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
 
 
@@ -958,11 +953,9 @@ def _entry_from_feed(e: Any) -> EntryDict:
         html_content = text_to_html(summary)
     tstruct = getattr(e, "published_parsed", None) or getattr(e, "updated_parsed", None)
     if tstruct:
-        pub_utc = datetime.datetime(
-            *tstruct[:6], tzinfo=datetime.timezone.utc
-        ).isoformat()
+        pub_utc = datetime.datetime(*tstruct[:6], tzinfo=datetime.UTC).isoformat()
     else:
-        pub_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        pub_utc = datetime.datetime.now(datetime.UTC).isoformat()
     author = getattr(e, "author", "") or getattr(e, "creator", "") or ""
     return {
         "article_title": title,
@@ -1373,7 +1366,7 @@ def main() -> None:
             try:
                 mp3_path.unlink()
                 print(f"  → Deleted local MP3: {mp3_path}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 print(f"  → Warning: could not delete MP3: {e}")
 
         print("  → Updating RSS feed")
@@ -1434,7 +1427,7 @@ def main() -> None:
             billing_usage = cast(BillingUsage, fetch_tts_usage())
             summary = _ensure_json_dict(billing_usage.get("summary"))
             billing_used = int(summary.get("characters", 0) or 0)
-            print("  Billing cycle: {:,} characters used".format(billing_used))
+            print(f"  Billing cycle: {billing_used:,} characters used")
 
             groups_data_input: object = billing_usage.get("by_group", [])
             if isinstance(groups_data_input, list):
@@ -1465,7 +1458,7 @@ def main() -> None:
                     premium["free_tier_remaining"],
                 )
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"  Billing query failed: {e}")
 
     pending_deploy = state.get("pending_deploy", False)
@@ -1526,7 +1519,7 @@ def deploy_pages() -> tuple[bool, bool]:
                 sh(*deploy_args)
                 print("Cloudflare Pages deploy OK")
                 return True, True
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 print(f"Wrangler deploy failed: {e}")
                 return True, False
         else:
