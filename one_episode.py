@@ -688,9 +688,7 @@ def main() -> None:
     print(f"RSS source (RSS_URL): {_describe_rss_source(RSS_URL)}")
     e = select_entry()
     # filename: <YYYYMMDD-HHMMSS>-<slug(title or path)>
-    dt = datetime.datetime.fromisoformat(
-        e["pub_utc"]
-    ).astimezone(datetime.UTC)
+    dt = datetime.datetime.fromisoformat(e["pub_utc"]).astimezone(datetime.UTC)
     ts = dt.strftime("%Y%m%d-%H%M%S")
     slug = slugify(e["link"] or e["title"])
     mp3_name = f"{ts}-{slug}.mp3"
