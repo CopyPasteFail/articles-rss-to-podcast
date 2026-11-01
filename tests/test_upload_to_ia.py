@@ -8,10 +8,10 @@ import pathlib
 import sys
 import types
 
-import requests
 from typing import Any
 
 import pytest
+import requests
 
 
 @pytest.fixture
