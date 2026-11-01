@@ -82,7 +82,7 @@ def cleanup_local(
         ):
             removed.append(str(hash_sidecar.resolve()))
     except Exception:  # noqa: BLE001
-        pass
+        pass  # nosec B110
 
     return removed
 
