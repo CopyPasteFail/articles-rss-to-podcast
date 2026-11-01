@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import pathlib
 import random
 import sys
 import time
-from typing import Any, Iterable, Mapping, MutableMapping, Protocol, Sequence, cast
+from collections.abc import Callable, Iterable, Mapping, MutableMapping, Sequence
+from typing import Any, Protocol, cast
 
 import internetarchive
 import requests
@@ -29,6 +31,7 @@ class ArchiveFile(Protocol):
     """Protocol describing the file objects returned by internetarchive."""
 
     name: str
+    md5: str | None
 
 
 class ArchiveItem(Protocol):
@@ -44,6 +47,12 @@ class ArchiveItem(Protocol):
     ) -> Sequence[UploadResponse]: ...
 
     def get_files(self) -> Iterable[ArchiveFile]: ...
+
+
+class VerifiedUploadResponse:
+    """Successful upload confirmed by a matching remote checksum."""
+
+    ok = True
 
 
 class ArchiveSession(Protocol):
@@ -132,6 +141,49 @@ def wait_with_progress(seconds: float) -> None:
             print(f"... {int(remaining)}s remaining", flush=True)
 
 
+def local_file_md5(path: pathlib.Path) -> str:
+    """Calculate the checksum without reading the entire MP3 into memory."""
+    digest = hashlib.md5(usedforsecurity=False)
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def remote_upload_matches(
+    session: ArchiveSession,
+    identifier: str,
+    remote_name: str,
+    local_path: pathlib.Path,
+    *,
+    request_kwargs: Mapping[str, Any],
+) -> bool:
+    """Confirm an ambiguous upload by matching fresh IA metadata to local MD5."""
+    expected_md5 = local_file_md5(local_path)
+    try:
+        remote_item = session.get_item(identifier, request_kwargs=dict(request_kwargs))
+        return any(
+            file.name == remote_name
+            and file.md5 is not None
+            and file.md5.lower() == expected_md5
+            for file in remote_item.get_files()
+        )
+    except requests.exceptions.RequestException as exc:
+        print(f"Could not confirm IA upload after timeout: {exc}", flush=True)
+        return False
+
+
+def ia_upload_request_kwargs() -> dict[str, tuple[float, float]]:
+    """Use a 120-second read timeout by default, preserving env overrides."""
+    try:
+        read_timeout = float(os.getenv("IA_UPLOAD_TIMEOUT", "120"))
+        if not math.isfinite(read_timeout):
+            raise ValueError("non-finite timeout")
+    except ValueError:
+        read_timeout = 120.0
+    return {"timeout": (15.0, max(30.0, read_timeout))}
+
+
 def upload_with_retries(
     item: ArchiveItem,
     files: Mapping[str, str],
@@ -140,6 +192,7 @@ def upload_with_retries(
     verbose: bool = False,
     max_attempts: int = 5,
     request_kwargs: Mapping[str, Any] | None = None,
+    confirm_upload: Callable[[], bool] | None = None,
 ) -> Sequence[UploadResponse]:
     """Upload files to IA, retrying transient errors with exponential backoff, delaying between attempts via retry_delay so we slow down when IA asks us to."""
     if max_attempts < 1:
@@ -159,6 +212,13 @@ def upload_with_retries(
                 request_kwargs=request_kwargs,
             )
         except requests.exceptions.RequestException as exc:
+            if (
+                isinstance(exc, requests.exceptions.Timeout)
+                and confirm_upload is not None
+                and confirm_upload()
+            ):
+                print("IA upload confirmed by remote MD5 after timeout", flush=True)
+                return [VerifiedUploadResponse()]
             if not should_retry(exc) or attempt == max_attempts:
                 raise
             response: requests.Response | None = getattr(exc, "response", None)
@@ -258,12 +318,7 @@ def main() -> None:
     except ValueError:
         max_attempts = 5
     max_attempts = max(1, max_attempts)
-    read_timeout_env = os.getenv("IA_UPLOAD_TIMEOUT", "10")
-    try:
-        read_timeout = float(read_timeout_env)
-    except ValueError:
-        read_timeout = 300.0
-    request_kwargs = {"timeout": (15.0, max(30.0, read_timeout))}
+    request_kwargs = ia_upload_request_kwargs()
     print(
         f"Using IA request timeouts connect={request_kwargs['timeout'][0]}s "
         f"read={request_kwargs['timeout'][1]}s\n",
@@ -300,6 +355,13 @@ def main() -> None:
         verbose=True,
         max_attempts=max_attempts,
         request_kwargs=request_kwargs,
+        confirm_upload=lambda: remote_upload_matches(
+            session,
+            identifier,
+            remote_name,
+            mp3_path,
+            request_kwargs=request_kwargs,
+        ),
     )
 
     ok = all(getattr(r, "ok", False) for r in result)
