@@ -11,16 +11,8 @@ import pathlib
 import random
 import sys
 import time
-from typing import (
-    Any,
-    Callable,
-    Iterable,
-    Mapping,
-    MutableMapping,
-    Protocol,
-    Sequence,
-    cast,
-)
+from collections.abc import Callable, Iterable, Mapping, MutableMapping, Sequence
+from typing import Any, Protocol, cast
 
 import internetarchive
 import requests
@@ -220,10 +212,13 @@ def upload_with_retries(
                 request_kwargs=request_kwargs,
             )
         except requests.exceptions.RequestException as exc:
-            if isinstance(exc, requests.exceptions.Timeout) and confirm_upload:
-                if confirm_upload():
-                    print("IA upload confirmed by remote MD5 after timeout", flush=True)
-                    return [VerifiedUploadResponse()]
+            if (
+                isinstance(exc, requests.exceptions.Timeout)
+                and confirm_upload is not None
+                and confirm_upload()
+            ):
+                print("IA upload confirmed by remote MD5 after timeout", flush=True)
+                return [VerifiedUploadResponse()]
             if not should_retry(exc) or attempt == max_attempts:
                 raise
             response: requests.Response | None = getattr(exc, "response", None)
