@@ -81,8 +81,8 @@ def cleanup_local(
             hash_sidecar.resolve(), dry_run=dry_run
         ):
             removed.append(str(hash_sidecar.resolve()))
-    except Exception:  # noqa: BLE001
-        pass  # nosec B110
+    except Exception as exc:  # noqa: BLE001
+        print(f"Could not remove optional link-hash sidecar: {exc}", file=sys.stderr)
 
     return removed
 
