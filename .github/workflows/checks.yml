@@ -34,7 +34,7 @@ jobs:
             -x '(^|/)(\.git|\.venv|node_modules|out|__pycache__|\.pytest_cache|\.wrangler)(/|$)'
 
       - name: Ruff format check
-        run: python -m ruff format --check .
+        run: python -m ruff format --diff .
 
       - name: Ruff lint
         run: python -m ruff check .
