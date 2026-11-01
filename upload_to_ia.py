@@ -11,7 +11,16 @@ import pathlib
 import random
 import sys
 import time
-from typing import Any, Callable, Iterable, Mapping, MutableMapping, Protocol, Sequence, cast
+from typing import (
+    Any,
+    Callable,
+    Iterable,
+    Mapping,
+    MutableMapping,
+    Protocol,
+    Sequence,
+    cast,
+)
 
 import internetarchive
 import requests
@@ -160,9 +169,7 @@ def remote_upload_matches(
     """Confirm an ambiguous upload by matching fresh IA metadata to local MD5."""
     expected_md5 = local_file_md5(local_path)
     try:
-        remote_item = session.get_item(
-            identifier, request_kwargs=dict(request_kwargs)
-        )
+        remote_item = session.get_item(identifier, request_kwargs=dict(request_kwargs))
         return any(
             file.name == remote_name
             and file.md5 is not None
