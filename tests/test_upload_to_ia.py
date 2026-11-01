@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib
+import pathlib
 import sys
 import types
+
+import requests
 from typing import Any
 
 import pytest
@@ -103,3 +107,112 @@ def test_get_ia_session_falls_back_without_logging_local_config_source(
     output = capsys.readouterr().out
     assert "Initializing Internet Archive session" in output
     assert "default IA config" not in output
+
+
+def test_upload_timeout_configuration(monkeypatch: Any, upload_to_ia_module: Any) -> None:
+    monkeypatch.delenv("IA_UPLOAD_TIMEOUT", raising=False)
+    assert upload_to_ia_module.ia_upload_request_kwargs()["timeout"] == (15.0, 120.0)
+
+    monkeypatch.setenv("IA_UPLOAD_TIMEOUT", "45")
+    assert upload_to_ia_module.ia_upload_request_kwargs()["timeout"] == (15.0, 45.0)
+
+    monkeypatch.setenv("IA_UPLOAD_TIMEOUT", "invalid")
+    assert upload_to_ia_module.ia_upload_request_kwargs()["timeout"] == (15.0, 120.0)
+
+
+def test_timeout_with_matching_remote_checksum_is_success(
+    tmp_path: pathlib.Path, upload_to_ia_module: Any
+) -> None:
+    mp3 = tmp_path / "episode.mp3"
+    mp3.write_bytes(b"test audio")
+    md5 = hashlib.md5(mp3.read_bytes(), usedforsecurity=False).hexdigest()
+    remote_file = types.SimpleNamespace(name="episode.mp3", md5=md5)
+    remote_item = types.SimpleNamespace(get_files=lambda: [remote_file])
+    session = types.SimpleNamespace(
+        get_item=lambda identifier, request_kwargs: remote_item
+    )
+    attempts = []
+
+    def upload(*args: Any, **kwargs: Any) -> None:
+        attempts.append(1)
+        raise requests.exceptions.ReadTimeout("upload response lost")
+
+    kwargs = {"timeout": (15.0, 120.0)}
+    item = types.SimpleNamespace(upload=upload)
+    responses = upload_to_ia_module.upload_with_retries(
+        item, {"episode.mp3": str(mp3)}, metadata={}, max_attempts=3,
+        request_kwargs=kwargs,
+        confirm_upload=lambda: upload_to_ia_module.remote_upload_matches(
+            session, "article-id", "episode.mp3", mp3, request_kwargs=kwargs
+        ),
+    )
+
+    assert len(attempts) == 1
+    assert all(response.ok for response in responses)
+
+
+def test_timeout_with_mismatched_remote_checksum_retries(
+    monkeypatch: Any, tmp_path: pathlib.Path, upload_to_ia_module: Any
+) -> None:
+    mp3 = tmp_path / "episode.mp3"
+    mp3.write_bytes(b"new audio")
+    remote_file = types.SimpleNamespace(name="episode.mp3", md5="0" * 32)
+    remote_item = types.SimpleNamespace(get_files=lambda: [remote_file])
+    session = types.SimpleNamespace(
+        get_item=lambda identifier, request_kwargs: remote_item
+    )
+    attempts = []
+    success = types.SimpleNamespace(ok=True)
+
+    def upload(*args: Any, **kwargs: Any) -> list[Any]:
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise requests.exceptions.ReadTimeout("upload response lost")
+        return [success]
+
+    monkeypatch.setattr(upload_to_ia_module, "wait_with_progress", lambda _: None)
+    monkeypatch.setattr(upload_to_ia_module, "retry_delay", lambda *_: 0.0)
+    kwargs = {"timeout": (15.0, 120.0)}
+    responses = upload_to_ia_module.upload_with_retries(
+        types.SimpleNamespace(upload=upload),
+        {"episode.mp3": str(mp3)}, metadata={}, max_attempts=3,
+        request_kwargs=kwargs,
+        confirm_upload=lambda: upload_to_ia_module.remote_upload_matches(
+            session, "article-id", "episode.mp3", mp3, request_kwargs=kwargs
+        ),
+    )
+
+    assert len(attempts) == 2
+    assert responses == [success]
+
+
+def test_failed_metadata_check_does_not_hide_upload_timeout(
+    monkeypatch: Any, tmp_path: pathlib.Path, upload_to_ia_module: Any
+) -> None:
+    mp3 = tmp_path / "episode.mp3"
+    mp3.write_bytes(b"new audio")
+    checks = []
+
+    def get_item(identifier: str, request_kwargs: object) -> None:
+        checks.append(1)
+        raise requests.exceptions.ReadTimeout("metadata unavailable")
+
+    def upload(*args: Any, **kwargs: Any) -> None:
+        raise requests.exceptions.ReadTimeout("upload unavailable")
+
+    monkeypatch.setattr(upload_to_ia_module, "wait_with_progress", lambda _: None)
+    monkeypatch.setattr(upload_to_ia_module, "retry_delay", lambda *_: 0.0)
+    session = types.SimpleNamespace(get_item=get_item)
+    kwargs = {"timeout": (15.0, 120.0)}
+
+    with pytest.raises(requests.exceptions.ReadTimeout, match="upload unavailable"):
+        upload_to_ia_module.upload_with_retries(
+            types.SimpleNamespace(upload=upload),
+            {"episode.mp3": str(mp3)}, metadata={}, max_attempts=2,
+            request_kwargs=kwargs,
+            confirm_upload=lambda: upload_to_ia_module.remote_upload_matches(
+                session, "article-id", "episode.mp3", mp3, request_kwargs=kwargs
+            ),
+        )
+
+    assert len(checks) == 2
