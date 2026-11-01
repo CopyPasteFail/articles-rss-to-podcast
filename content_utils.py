@@ -50,16 +50,16 @@ def _extract_value_field(data: Any) -> str | None:
     return None
 
 
-def _coerce_sequence[_SeqItem](
-    value: _SeqItem | list[_SeqItem] | tuple[_SeqItem, ...] | None,
-) -> list[_SeqItem]:
+def _coerce_sequence[SeqItem](
+    value: SeqItem | list[SeqItem] | tuple[SeqItem, ...] | None,
+) -> list[SeqItem]:
     """Turn lone values into lists so image scanning code can iterate safely."""
     if value is None:
         return []
     if isinstance(value, list):
-        return cast(list[_SeqItem], value)
+        return cast(list[SeqItem], value)
     if isinstance(value, tuple):
-        tuple_value = cast(tuple[_SeqItem, ...], value)
+        tuple_value = cast(tuple[SeqItem, ...], value)
         return list(tuple_value)
     return [value]
 
