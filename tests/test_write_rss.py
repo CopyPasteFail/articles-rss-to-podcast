@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import pathlib
 import importlib
+import pathlib
 import sys
 import types
 import xml.etree.ElementTree as ET

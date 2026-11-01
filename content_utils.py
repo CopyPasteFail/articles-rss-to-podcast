@@ -6,8 +6,8 @@ import html as _html
 import re
 import string
 import unicodedata
-from collections.abc import Iterable
-from typing import Any, Callable, Mapping, TypeVar, cast
+from collections.abc import Callable, Iterable, Mapping
+from typing import Any, TypeVar, cast
 from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup

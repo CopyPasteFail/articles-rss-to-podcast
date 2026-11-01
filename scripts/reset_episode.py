@@ -153,11 +153,7 @@ def main() -> None:
     else:
         print("[info] No local artifacts matched that article")
 
-    print(
-        "\nNext run `python run_feed.py {}` to regenerate the episode.".format(
-            args.slug
-        )
-    )
+    print(f"\nNext run `python run_feed.py {args.slug}` to regenerate the episode.")
 
 
 if __name__ == "__main__":

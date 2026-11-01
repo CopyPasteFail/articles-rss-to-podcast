@@ -12,7 +12,6 @@ from dataclasses import dataclass
 import requests
 from dotenv import dotenv_values
 
-
 ROOT_MARKERS = (".git", "pyproject.toml", "README.md")
 
 

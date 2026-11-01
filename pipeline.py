@@ -7,17 +7,17 @@ import datetime
 import hashlib
 import html
 import importlib
+import io
 import json
 import os
 import pathlib
-import re
 import random
+import re
 import shutil
 import subprocess  # nosec B404
 import sys
 import tempfile
 import time
-import io
 from collections.abc import Mapping
 from typing import Any, Protocol, TypedDict, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -260,15 +260,13 @@ def _parse_wordpress_post_pub_utc(post: Mapping[str, Any]) -> str:
             continue
         if parsed_datetime.tzinfo is None:
             if field_name.endswith("_gmt"):
-                parsed_datetime = parsed_datetime.replace(tzinfo=datetime.timezone.utc)
+                parsed_datetime = parsed_datetime.replace(tzinfo=datetime.UTC)
             else:
-                parsed_datetime = parsed_datetime.astimezone().astimezone(
-                    datetime.timezone.utc
-                )
+                parsed_datetime = parsed_datetime.astimezone().astimezone(datetime.UTC)
         else:
-            parsed_datetime = parsed_datetime.astimezone(datetime.timezone.utc)
+            parsed_datetime = parsed_datetime.astimezone(datetime.UTC)
         return parsed_datetime.isoformat()
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+    return datetime.datetime.now(datetime.UTC).isoformat()
 
 
 def _entry_from_wordpress_post(post: Mapping[str, Any]) -> EntryDict:
@@ -692,7 +690,7 @@ def _record_entry_failure(
     Edge cases: empty message or timestamps; caller is responsible for persistence.
     Atomicity: not thread-safe; caller must persist in KV after mutation.
     """
-    failure_timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    failure_timestamp = datetime.datetime.now(datetime.UTC).isoformat()
     previous_attempt_count = int(
         entry_state.get(FAILED_ENTRY_ATTEMPT_COUNT_KEY, 0) or 0
     )
@@ -958,11 +956,9 @@ def _entry_from_feed(e: Any) -> EntryDict:
         html_content = text_to_html(summary)
     tstruct = getattr(e, "published_parsed", None) or getattr(e, "updated_parsed", None)
     if tstruct:
-        pub_utc = datetime.datetime(
-            *tstruct[:6], tzinfo=datetime.timezone.utc
-        ).isoformat()
+        pub_utc = datetime.datetime(*tstruct[:6], tzinfo=datetime.UTC).isoformat()
     else:
-        pub_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        pub_utc = datetime.datetime.now(datetime.UTC).isoformat()
     author = getattr(e, "author", "") or getattr(e, "creator", "") or ""
     return {
         "article_title": title,
@@ -1434,7 +1430,7 @@ def main() -> None:
             billing_usage = cast(BillingUsage, fetch_tts_usage())
             summary = _ensure_json_dict(billing_usage.get("summary"))
             billing_used = int(summary.get("characters", 0) or 0)
-            print("  Billing cycle: {:,} characters used".format(billing_used))
+            print(f"  Billing cycle: {billing_used:,} characters used")
 
             groups_data_input: object = billing_usage.get("by_group", [])
             if isinstance(groups_data_input, list):

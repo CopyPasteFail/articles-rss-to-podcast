@@ -12,8 +12,9 @@ import os
 import pathlib
 import re
 import sys
+from collections.abc import Callable, Mapping, Sequence
 from types import SimpleNamespace
-from typing import Any, Callable, Mapping, Protocol, Sequence, TypedDict
+from typing import Any, Protocol, TypedDict
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import feedparser
@@ -293,13 +294,11 @@ def _parse_wordpress_post_pub_utc(post: Mapping[str, Any]) -> tuple[int, ...] | 
             continue
         if parsed_datetime.tzinfo is None:
             if field_name.endswith("_gmt"):
-                parsed_datetime = parsed_datetime.replace(tzinfo=datetime.timezone.utc)
+                parsed_datetime = parsed_datetime.replace(tzinfo=datetime.UTC)
             else:
-                parsed_datetime = parsed_datetime.astimezone().astimezone(
-                    datetime.timezone.utc
-                )
+                parsed_datetime = parsed_datetime.astimezone().astimezone(datetime.UTC)
         else:
-            parsed_datetime = parsed_datetime.astimezone(datetime.timezone.utc)
+            parsed_datetime = parsed_datetime.astimezone(datetime.UTC)
         return parsed_datetime.timetuple()[:9]
     return None
 
@@ -450,11 +449,9 @@ def feed_entry_to_meta(e: object, *, allow_fetch: bool = False) -> EntryMeta:
         author = _ensure_str(getattr(e, "creator", None))
     tstruct = getattr(e, "published_parsed", None) or getattr(e, "updated_parsed", None)
     if tstruct:
-        pub_utc = datetime.datetime(
-            *tstruct[:6], tzinfo=datetime.timezone.utc
-        ).isoformat()
+        pub_utc = datetime.datetime(*tstruct[:6], tzinfo=datetime.UTC).isoformat()
     else:
-        pub_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        pub_utc = datetime.datetime.now(datetime.UTC).isoformat()
     plain_text, html_content, subtitle, lead_image = resolve_article_content(
         e, link, allow_fetch=allow_fetch, article_title=title
     )
@@ -696,7 +693,7 @@ def main() -> None:
     # filename: <YYYYMMDD-HHMMSS>-<slug(title or path)>
     dt = datetime.datetime.fromisoformat(
         e["pub_utc"].replace("Z", "+00:00")
-    ).astimezone(datetime.timezone.utc)
+    ).astimezone(datetime.UTC)
     ts = dt.strftime("%Y%m%d-%H%M%S")
     slug = slugify(e["link"] or e["title"])
     mp3_name = f"{ts}-{slug}.mp3"

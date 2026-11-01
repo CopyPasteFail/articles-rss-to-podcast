@@ -6,13 +6,13 @@ import pathlib
 
 import pytest
 
+from tools.generate_workflow import generate_workflow_yaml
 from tools.pipeline_config import (
     GitHubConfig,
     GoogleConfig,
     PipelineConfig,
     ScheduleConfig,
 )
-from tools.generate_workflow import generate_workflow_yaml
 from tools.setup_github_environment import (
     build_environment_variable_values,
     build_repository_variable_values,

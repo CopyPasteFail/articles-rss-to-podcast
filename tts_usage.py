@@ -2,26 +2,20 @@
 
 from __future__ import annotations
 
+import os
 import pathlib
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import (
     Any,
-    Iterable,
-    List,
-    Mapping,
-    Optional,
-    Sequence,
-    Tuple,
     TypedDict,
     Union,
     cast,
 )
-import os
 
 from google.cloud import bigquery
 from google.cloud.bigquery.table import Row as BigQueryRow
-
 
 SQL_TEMPLATE_PATH = pathlib.Path(__file__).with_name("tts_usage.sql")
 BILLING_EXPORT_TABLE_ENV_NAME = "BILLING_EXPORT_TABLE"
@@ -64,9 +58,9 @@ class UsageRow:
     """Flattened view of the SQL results used for summary/by_group/daily tables."""
 
     section: str
-    label: Optional[str]
+    label: str | None
     characters: int
-    free_tier_remaining: Optional[int]
+    free_tier_remaining: int | None
 
 
 class UsageSummary(TypedDict):
@@ -79,7 +73,7 @@ class UsageSummary(TypedDict):
 class UsageGroup(TypedDict):
     """Per-voice-group stats so we know when each tier hits its limit."""
 
-    label: Optional[str]
+    label: str | None
     characters: int
     free_tier_remaining: int
 
@@ -87,7 +81,7 @@ class UsageGroup(TypedDict):
 class UsageDaily(TypedDict):
     """Daily breakdown for operators wondering when spend spiked."""
 
-    label: Optional[str]
+    label: str | None
     characters: int
 
 
@@ -95,35 +89,35 @@ class UsageReport(TypedDict):
     """Convenience container returned by fetch_tts_usage."""
 
     summary: UsageSummary
-    by_group: List[UsageGroup]
-    daily: List[UsageDaily]
+    by_group: list[UsageGroup]
+    daily: list[UsageDaily]
 
 
 _EMPTY_SUMMARY: UsageSummary = {"characters": 0, "free_tier_remaining": 0}
-_EMPTY_GROUPS: Tuple[UsageGroup, ...] = ()
-_EMPTY_DAILY: Tuple[UsageDaily, ...] = ()
+_EMPTY_GROUPS: tuple[UsageGroup, ...] = ()
+_EMPTY_DAILY: tuple[UsageDaily, ...] = ()
 
 Numeric = Union[int, float, Decimal]
 
 
-def _int_or_zero(value: Optional[Numeric]) -> int:
+def _int_or_zero(value: Numeric | None) -> int:
     """Guard against NULL numeric fields coming back from BigQuery."""
     return 0 if value is None else int(value)
 
 
-def _optional_int(value: Optional[Numeric]) -> Optional[int]:
+def _optional_int(value: Numeric | None) -> int | None:
     """Convert numeric values to ints while preserving None."""
     return None if value is None else int(value)
 
 
-def _rows_from_query(result: Iterable[BigQueryRow]) -> List[UsageRow]:
+def _rows_from_query(result: Iterable[BigQueryRow]) -> list[UsageRow]:
     """Turn the BigQuery response into friendly UsageRow objects."""
-    rows: List[UsageRow] = []
+    rows: list[UsageRow] = []
     for row in result:
         section = cast(str, row["section"])
-        label = cast(Optional[str], row["label"])
-        characters_value = cast(Optional[Numeric], row["characters"])
-        free_tier_value = cast(Optional[Numeric], row["free_tier_remaining"])
+        label = cast(str | None, row["label"])
+        characters_value = cast(Numeric | None, row["characters"])
+        free_tier_value = cast(Numeric | None, row["free_tier_remaining"])
         rows.append(
             UsageRow(
                 section=section,
@@ -135,7 +129,7 @@ def _rows_from_query(result: Iterable[BigQueryRow]) -> List[UsageRow]:
     return rows
 
 
-def fetch_tts_usage(client: Optional[bigquery.Client] = None) -> UsageReport:
+def fetch_tts_usage(client: bigquery.Client | None = None) -> UsageReport:
     """Run the billing SQL so pipeline.py can update stats and CLI can print them."""
     provided_client = client is not None
     client = client or bigquery.Client(project=_billing_project_id())
@@ -176,7 +170,7 @@ def fetch_tts_usage(client: Optional[bigquery.Client] = None) -> UsageReport:
 def _print_table(headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
     """Pretty-print tabular data for the CLI report."""
     # rows = list of iterables (strings or numbers)
-    string_rows: List[List[str]] = [[str(c) for c in r] for r in rows]
+    string_rows: list[list[str]] = [[str(c) for c in r] for r in rows]
     widths = [len(h) for h in headers]
     for r in string_rows:
         for i, c in enumerate(r):
@@ -195,15 +189,15 @@ def _print_table(headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
 
 def print_usage_report(data: Mapping[str, Any]) -> None:
     """Simple CLI front-end for fetch_tts_usage (used locally and in automation)."""
-    summary_value = cast(Optional[UsageSummary], data.get("summary"))
+    summary_value = cast(UsageSummary | None, data.get("summary"))
     summary: UsageSummary = (
         summary_value if summary_value is not None else _EMPTY_SUMMARY
     )
-    by_group_value = cast(Optional[Sequence[UsageGroup]], data.get("by_group"))
+    by_group_value = cast(Sequence[UsageGroup] | None, data.get("by_group"))
     by_group: Sequence[UsageGroup] = (
         by_group_value if by_group_value is not None else _EMPTY_GROUPS
     )
-    daily_value = cast(Optional[Sequence[UsageDaily]], data.get("daily"))
+    daily_value = cast(Sequence[UsageDaily] | None, data.get("daily"))
     daily: Sequence[UsageDaily] = (
         daily_value if daily_value is not None else _EMPTY_DAILY
     )
@@ -218,7 +212,7 @@ def print_usage_report(data: Mapping[str, Any]) -> None:
         print("none")
     else:
         headers = ["group", "used", "free_left"]
-        rows: List[Sequence[Any]] = [
+        rows: list[Sequence[Any]] = [
             (r["label"], r["characters"], r["free_tier_remaining"]) for r in by_group
         ]
         _print_table(headers, rows)

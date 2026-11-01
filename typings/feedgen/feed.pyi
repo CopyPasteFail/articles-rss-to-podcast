@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any
 
 class PodcastExtension:
@@ -38,4 +36,4 @@ class FeedGenerator:
     ) -> None: ...
     def add_entry(self) -> FeedEntry: ...
 
-__all__ = ["FeedGenerator", "FeedEntry"]
+__all__ = ["FeedEntry", "FeedGenerator"]
