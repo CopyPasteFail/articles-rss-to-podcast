@@ -12,3 +12,4 @@ github:
   workflow_file: .github/workflows/geektime-he.yml
   branch_ref: refs/heads/main
   environment: geektime-he
+  runtime_image: ghcr.io/copypastefail/articles-rss-to-podcast-runtime@sha256:e41dc03c1ef1b591be8109a988d562edcd686e9f104c5ad829b411b204d58311

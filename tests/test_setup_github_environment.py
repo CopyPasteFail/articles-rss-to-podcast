@@ -239,6 +239,28 @@ def test_container_workflow_uses_pinned_runtime_without_install_steps() -> None:
     )
 
 
+def test_committed_podcast_workflow_matches_generator() -> None:
+    root = pathlib.Path(__file__).resolve().parents[1]
+    config = load_pipeline_config(root, pipeline_id="geektime-he")
+    assert (root / config.github.workflow_file).read_text(encoding="utf-8") == (
+        generate_workflow_yaml(config)
+    )
+
+
+def test_runtime_workflows_do_not_upload_actions_artifacts() -> None:
+    root = pathlib.Path(__file__).resolve().parents[1]
+    for name in ("runtime-image.yml", "geektime-he.yml"):
+        workflow = yaml.safe_load((root / ".github/workflows" / name).read_text())
+        for job in workflow["jobs"].values():
+            for step in job["steps"]:
+                action = step.get("uses", "")
+                assert not action.startswith("actions/upload-artifact@")
+                if action.startswith("docker/build-push-action@"):
+                    env = workflow.get("env", {}) | step.get("env", {})
+                    assert str(env.get("DOCKER_BUILD_RECORD_UPLOAD")).lower() == "false"
+                assert "cache-to: type=gha" not in step.get("run", "")
+
+
 @pytest.mark.parametrize(
     "image",
     [

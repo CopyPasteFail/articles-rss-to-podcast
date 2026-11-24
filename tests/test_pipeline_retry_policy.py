@@ -471,3 +471,76 @@ def test_main_fails_fast_when_google_credentials_are_unusable(
         match="Google credential sanity check failed: Unable to acquire impersonated credentials",
     ):
         pipeline.main()
+
+
+@pytest.mark.parametrize("pending_deploy", [False, True])
+def test_no_new_articles_preserve_pending_deploy_handling(
+    pending_deploy: bool, monkeypatch
+) -> None:
+    date = "2026-11-24T12:00:00+00:00"
+    entry = {"article_link": "https://example.com/article", "article_pub_utc": date}
+    state = {
+        "items": {
+            "existing": {
+                "rss_added": True,
+                "last_pub_utc": date,
+                "uploaded_url": "https://archive.org/existing.mp3",
+            }
+        },
+        "pending_deploy": pending_deploy,
+    }
+    deployments: list[bool] = []
+    monkeypatch.setattr(pipeline, "RSS_URL", "https://example.com/feed")
+    monkeypatch.setattr(pipeline, "fetch_entries_from_rss", lambda: [entry])
+    monkeypatch.setattr(pipeline, "ensure_kv_namespace_id", lambda: None)
+    monkeypatch.setattr(pipeline, "kv_get", lambda key: state)
+    monkeypatch.setattr(pipeline, "kv_put_or_die", lambda key, value: None)
+    monkeypatch.setattr(pipeline, "ia_identifier_for_link", lambda link: "existing")
+
+    def deploy() -> tuple[bool, bool]:
+        deployments.append(True)
+        return True, True
+
+    def no_audio_or_upload(*args, **kwargs):
+        raise AssertionError("An unchanged feed must not generate or upload audio")
+
+    monkeypatch.setattr(pipeline, "sh", no_audio_or_upload)
+    monkeypatch.setattr(pipeline, "deploy_pages", deploy)
+    pipeline.main()
+    assert len(deployments) == int(pending_deploy)
+    assert state["pending_deploy"] is False
+
+
+def test_existing_audio_repairs_feed_without_synthesis(tmp_path, monkeypatch) -> None:
+    date = "2026-11-24T12:00:00+00:00"
+    entry = {
+        "article_link": "https://example.com/article",
+        "article_title": "Existing audio",
+        "article_summary": "Body",
+        "article_pub_utc": date,
+    }
+    state = {
+        "items": {"existing": {"rss_added": False, "last_pub_utc": date}},
+        "pending_deploy": False,
+    }
+    commands: list[tuple[object, ...]] = []
+    monkeypatch.setattr(pipeline, "RSS_URL", "https://example.com/feed")
+    monkeypatch.setattr(pipeline, "OUT", tmp_path)
+    monkeypatch.setattr(pipeline, "fetch_entries_from_rss", lambda: [entry])
+    monkeypatch.setattr(pipeline, "ensure_kv_namespace_id", lambda: None)
+    monkeypatch.setattr(pipeline, "kv_get", lambda key: state)
+    monkeypatch.setattr(pipeline, "kv_put_or_die", lambda key, value: None)
+    monkeypatch.setattr(pipeline, "ia_identifier_for_link", lambda link: "existing")
+    monkeypatch.setattr(pipeline, "ia_has_episode_http", lambda identifier: True)
+    monkeypatch.setattr(pipeline, "deploy_pages", lambda: (True, True))
+
+    def run(*args, **kwargs) -> str:
+        commands.append(args)
+        assert str(args[1]).endswith("write_rss.py")
+        return ""
+
+    monkeypatch.setattr(pipeline, "sh", run)
+    pipeline.main()
+    assert len(commands) == 1
+    assert state["items"]["existing"]["rss_added"] is True
+    assert state["pending_deploy"] is False
