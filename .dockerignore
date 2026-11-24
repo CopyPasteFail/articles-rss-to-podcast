@@ -1,0 +1,6 @@
+# The runtime contains dependencies only. Source is checked out when a job runs.
+**
+!Dockerfile
+!requirements.txt
+!package.json
+!package-lock.json

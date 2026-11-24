@@ -331,6 +331,44 @@ Behavior:
 - reads pipeline-specific values from environment variables and secrets
 - generates one public-safe workflow file
 
+### Prebuilt podcast runtime
+
+Scheduled runs can use the dependency-only image built by the **Runtime image**
+workflow. It contains Python 3.13, Node 22, FFmpeg/ffprobe, the Python requirements,
+and lockfile-installed Wrangler. Code and Google credentials are supplied when the
+podcast job runs. Dependencies live outside the checked-out workspace.
+
+The image workflow builds only when its dependency inputs change, or when run
+manually. Before publishing to GHCR, it checks runtime imports, tool startup, and a
+synthetic MP3 normalization round trip with network access disabled. It uses
+Docker directly and uploads no Actions artifacts or persistent Docker build cache.
+
+To promote an image:
+
+1. Build and test it with the Runtime image workflow. Copy its full image digest
+   from the job summary.
+2. Set `github.runtime_image` in the pipeline YAML to that GHCR reference, ending
+   in `@sha256:<digest>`, then regenerate the workflow and review the diff.
+3. Run the podcast workflow manually and inspect the result. Restore the previous
+   digest to roll back an image update.
+
+The podcast job authenticates GHCR pulls with its built-in `GITHUB_TOKEN`, so the
+image does not require a separate registry account or a personal access token.
+Keep the package linked to this repository so its workflows can pull it.
+Configurations without `github.runtime_image` retain the hosted-runner setup.
+
+GitHub currently makes GHCR image storage/bandwidth and standard hosted runners
+for public repositories free. Actions artifacts are a separate storage category;
+this runtime does not upload them. See [Packages billing](https://docs.github.com/en/billing/concepts/product-billing/github-packages)
+and [Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
+
+Source fetching happens before Cloudflare state access. Transient source failures
+are retried once per endpoint with short timeouts; blocked endpoints are not
+retried. The WordPress fallback remains available. Each selected article is
+passed to the audio child with `--entry-file`, avoiding another feed request while
+preserving full-article extraction. The normal local command stays
+`python run_feed.py <feed_slug>`.
+
 ## Notes
 
 - Local mode does not require GitHub Actions setup.

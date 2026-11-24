@@ -49,6 +49,48 @@ def generate_workflow_yaml(pipeline_config: PipelineConfig) -> str:
 
     schedule_entries = render_schedule_cron_entries(pipeline_config.schedule)
     google_auth_mask_step = build_google_auth_mask_step()
+    runtime_image = pipeline_config.github.runtime_image
+    container_settings = ""
+    packages_permission = ""
+    setup_steps = """      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Audio Dependencies
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+"""
+    if runtime_image is not None:
+        packages_permission = "  packages: read\n"
+        container_settings = f"""    container:
+      image: '{runtime_image}'
+      credentials:
+        username: ${{{{ github.actor }}}}
+        password: ${{{{ secrets.GITHUB_TOKEN }}}}
+    defaults:
+      run:
+        shell: bash
+"""
+        setup_steps = ""
     schedule_lines = "\n".join(
         [
             "  schedule:",
@@ -108,13 +150,18 @@ on:
 permissions:
   contents: read
   id-token: write
+{packages_permission}
+concurrency:
+  group: {pipeline_config.pipeline_id}-${{{{ github.ref }}}}
+  cancel-in-progress: false
 
 jobs:
   run-pipeline:
     if: github.ref == '{pipeline_config.github.branch_ref}'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment: {pipeline_config.github.environment_name}
-    steps:
+    timeout-minutes: 60
+{container_settings}    steps:
       - uses: actions/checkout@v5
 
 {google_auth_mask_step}
@@ -126,25 +173,7 @@ jobs:
           create_credentials_file: true
           export_environment_variables: true
 
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.13'
-
-      - name: Install Python dependencies
-        run: pip install -r requirements.txt
-
-      - name: Install Audio Dependencies
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install Node dependencies
-        run: npm ci
-
-      - name: Run selected pipeline
+{setup_steps}      - name: Run selected pipeline
         id: run_pipeline
         shell: bash
         env:
@@ -167,11 +196,16 @@ jobs:
             echo "### Pipeline failure"
             echo ""
             echo "- Pipeline: {pipeline_config.pipeline_id}"
-            echo "- Exit code: ${{{{ steps.run_pipeline.outputs.exit_code }}}}"
+            echo "- Exit code: ${{{{ steps.run_pipeline.outputs.exit_code || 'not started' }}}}"
             echo "- Log file: ${{{{ steps.run_pipeline.outputs.log_file }}}}"
             echo ""
             echo '```text'
-            tail -n 80 "${{{{ steps.run_pipeline.outputs.log_file }}}}" || true
+            log_file="${{{{ steps.run_pipeline.outputs.log_file }}}}"
+            if [[ -n "$log_file" && -f "$log_file" ]]; then
+              tail -n 80 "$log_file"
+            else
+              echo "The pipeline did not start. See the failed setup step."
+            fi
             echo '```'
           }} >> "$GITHUB_STEP_SUMMARY"
 {failure_email_steps}"""  # nosec B608

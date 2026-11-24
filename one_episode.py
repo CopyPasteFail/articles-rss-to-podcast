@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import datetime
 import gzip
 import html
@@ -510,6 +511,40 @@ def select_entry() -> EntryMeta:
     return feed_entry_to_meta(target, allow_fetch=True)
 
 
+def load_entry_file(path: pathlib.Path) -> EntryMeta:
+    """Reuse the parent's selected article without requesting the feed again."""
+    try:
+        payload: object = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise TypeError("expected a JSON object")
+        entry = _to_mapping(payload)
+        for name in ("article_link", "article_title", "article_pub_utc"):
+            if not isinstance(entry.get(name), str) or not entry[name].strip():
+                raise ValueError(f"missing or invalid {name}")
+        published = datetime.datetime.fromisoformat(entry["article_pub_utc"])
+        if published.tzinfo is None:
+            raise ValueError("article_pub_utc must include a timezone")
+        if TARGET_LINK and entry["article_link"] != TARGET_LINK:
+            raise ValueError("article_link does not match TARGET_ENTRY_LINK")
+    except (OSError, TypeError, ValueError) as exc:
+        raise SystemExit(f"Invalid prepared entry {path}: {exc}") from exc
+
+    prepared = SimpleNamespace(
+        link=entry["article_link"],
+        title=entry["article_title"],
+        author=entry.get("article_author", ""),
+        summary=entry.get("article_summary", ""),
+        content=[{"value": entry.get("article_summary_html", "")}],
+        published_parsed=published.utctimetuple(),
+        article_image_url=entry.get("article_image_url", ""),
+    )
+    meta = feed_entry_to_meta(prepared, allow_fetch=True)
+    meta["article_subtitle"] = meta["article_subtitle"] or _ensure_str(
+        entry.get("article_subtitle")
+    )
+    return meta
+
+
 MAX_SSML_BYTES = 4500  # keep margin below Google's 5000-byte hard limit
 MAX_PARAGRAPH_CHARS = 1000  # break very large paragraphs into smaller chunks
 
@@ -680,13 +715,19 @@ def normalize_mp3(path: pathlib.Path) -> None:
     audio.export(path, format="mp3")
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
     """Drive the whole flow: select an article, render SSML, build MP3 + sidecar."""
-    if not RSS_URL:
-        sys.exit("Missing RSS_URL")
-
-    print(f"RSS source (RSS_URL): {_describe_rss_source(RSS_URL)}")
-    e = select_entry()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--entry-file", type=pathlib.Path)
+    args = parser.parse_args(argv)
+    if args.entry_file is not None:
+        e = load_entry_file(args.entry_file)
+        print(f"Using prepared article: {e['link']}")
+    else:
+        if not RSS_URL:
+            sys.exit("Missing RSS_URL")
+        print(f"RSS source (RSS_URL): {_describe_rss_source(RSS_URL)}")
+        e = select_entry()
     # filename: <YYYYMMDD-HHMMSS>-<slug(title or path)>
     dt = datetime.datetime.fromisoformat(e["pub_utc"]).astimezone(datetime.UTC)
     ts = dt.strftime("%Y%m%d-%H%M%S")

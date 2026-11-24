@@ -18,6 +18,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Mapping
+from email.utils import parsedate_to_datetime
 from typing import Any, Protocol, TypedDict, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -89,6 +90,51 @@ class FeedparserModule(Protocol):
 _feedparser_module: FeedparserModule | None = None
 
 
+def _source_retry_delay(retry_after: str | None) -> float | None:
+    """Honor short Retry-After values; leave long waits for the next scheduled run."""
+    if not retry_after:
+        return 1.0
+    try:
+        delay = float(int(retry_after))
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(retry_after)
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=datetime.UTC)
+            delay = retry_at.timestamp() - time.time()
+        except (ValueError, TypeError, OverflowError):
+            return 1.0
+    return max(0.0, delay) if delay <= RSS_HTTP_MAX_RETRY_DELAY_S else None
+
+
+def _get_source_response(
+    url: str, *, headers: dict[str, str], http_get: Any | None = None
+) -> Any:
+    """Retry a transient source failure once, with bounded network and wait time."""
+    request_get = http_get or requests.get
+    for attempt in range(2):
+        try:
+            response = request_get(
+                url,
+                headers=headers,
+                timeout=(RSS_HTTP_CONNECT_TIMEOUT_S, RSS_HTTP_READ_TIMEOUT_S),
+            )
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            if attempt or isinstance(exc, requests.exceptions.SSLError):
+                raise
+            delay = 1.0
+        else:
+            if attempt or response.status_code not in RSS_HTTP_RETRY_STATUS_CODES:
+                return response
+            delay = _source_retry_delay(response.headers.get("Retry-After"))
+            if delay is None:
+                return response
+            response.close()
+        print(f"[source] Transient failure for {url}; retrying once in {delay:.1f}s")
+        time.sleep(delay)
+    raise AssertionError("Source retry loop did not return or raise")
+
+
 def _get_feedparser() -> FeedparserModule:
     """Lazy-load feedparser so short-lived CLI invocations stay snappy."""
     global _feedparser_module
@@ -101,7 +147,7 @@ def _get_feedparser() -> FeedparserModule:
 def _fetch_rss_payload(
     rss_url: str,
     *,
-    http_get: Any = requests.get,
+    http_get: Any | None = None,
 ) -> tuple[bytes | None, str | None]:
     """Fetch RSS payload over HTTP(S) and classify common CDN/origin failures.
 
@@ -117,10 +163,10 @@ def _fetch_rss_payload(
     }
     source_feed_context = f"source RSS feed '{rss_url}'"
     try:
-        response = http_get(
+        response = _get_source_response(
             rss_url,
             headers=headers,
-            timeout=(RSS_HTTP_CONNECT_TIMEOUT_S, RSS_HTTP_READ_TIMEOUT_S),
+            http_get=http_get,
         )
     except requests.Timeout:
         return (
@@ -327,13 +373,11 @@ def _fetch_entries_from_wordpress_posts_api(
         "Accept": "application/json, */*;q=0.8",
     }
 
-    request_get = http_get or requests.get
-
     try:
-        response = request_get(
+        response = _get_source_response(
             request_url,
             headers=headers,
-            timeout=(RSS_HTTP_CONNECT_TIMEOUT_S, RSS_HTTP_READ_TIMEOUT_S),
+            http_get=http_get,
         )
         response.raise_for_status()
     except requests.Timeout:
@@ -389,8 +433,10 @@ IA_ID_PREFIX = os.getenv("IA_ID_PREFIX", SLUG).strip() or SLUG
 RSS_URL = os.getenv("RSS_URL", "").strip()
 WORDPRESS_POSTS_API_URL = os.getenv("WORDPRESS_POSTS_API_URL", "").strip()
 RSS_HTTP_USER_AGENT = "tts-podcast-rss-fetcher/1.0"
-RSS_HTTP_CONNECT_TIMEOUT_S = 10.0
-RSS_HTTP_READ_TIMEOUT_S = 20.0
+RSS_HTTP_CONNECT_TIMEOUT_S = 5.0
+RSS_HTTP_READ_TIMEOUT_S = 15.0
+RSS_HTTP_MAX_RETRY_DELAY_S = 5.0
+RSS_HTTP_RETRY_STATUS_CODES = {429, 500, 502, 503, 504, 520, 521, 522, 523, 524}
 RSS_HTTP_CLOUDFLARE_STATUS_CODES = {520, 521, 522, 523, 524, 525, 526}
 RSS_HTTP_BLOCK_STATUS_CODES = {403, 429, 503}
 DEFAULT_WORDPRESS_POSTS_PER_PAGE = 20
@@ -974,6 +1020,7 @@ def fetch_entries_from_rss(limit: int | None = None) -> list[EntryDict]:
     feedparser = _get_feedparser()
     payload, rss_error = _fetch_rss_payload(RSS_URL)
     if rss_error:
+        print(f"[source] {rss_error}")
         if WORDPRESS_POSTS_API_URL:
             print(
                 "[warn] RSS fetch failed; falling back to WordPress posts API "
@@ -1002,7 +1049,14 @@ def fetch_entries_from_rss(limit: int | None = None) -> list[EntryDict]:
     else:
         p = feedparser.parse(RSS_URL)
     if not p.entries:
-        raise SystemExit("RSS has no entries")
+        message = f"Source RSS feed '{RSS_URL}' returned no entries or invalid XML."
+        print(f"[source] {message}")
+        if WORDPRESS_POSTS_API_URL:
+            print("[source] Trying the WordPress posts API fallback")
+            return _fetch_entries_from_wordpress_posts_api(
+                WORDPRESS_POSTS_API_URL, limit=limit
+            )
+        raise SystemExit(message)
     entries = [_entry_from_feed(e) for e in p.entries]
     entries.sort(key=lambda ent: ent["article_pub_utc"])
     if limit is not None:
@@ -1044,6 +1098,11 @@ def main() -> None:
     if not RSS_URL:
         raise SystemExit("Missing RSS_URL")
 
+    print("[source] Fetching and validating the source before accessing pipeline state")
+    entries: list[EntryDict] = fetch_entries_from_rss()
+    if not entries:
+        raise SystemExit("RSS has no entries")
+
     ensure_kv_namespace_id()
     state_key = f"feed:{SLUG}"
     state = _ensure_json_dict(kv_get(state_key) or {})
@@ -1061,10 +1120,6 @@ def main() -> None:
     usage = cast(JSONDict, raw_usage_obj)
 
     state.setdefault("pending_deploy", False)
-
-    entries: list[EntryDict] = fetch_entries_from_rss()
-    if not entries:
-        raise SystemExit("RSS has no entries")
 
     total_entries = len(entries)
     force_full_rescan = os.getenv("PODCAST_FULL_RESCAN", "").strip().lower() in {
@@ -1275,7 +1330,18 @@ def main() -> None:
         env = os.environ.copy()
         env["TARGET_ENTRY_LINK"] = link or ""
         try:
-            out1 = sh(PY, str(ROOT / "one_episode.py"), env=env)
+            with tempfile.TemporaryDirectory(prefix="podcast-entry-") as entry_dir:
+                entry_path = pathlib.Path(entry_dir) / "entry.json"
+                entry_path.write_text(
+                    json.dumps(entry, ensure_ascii=False), encoding="utf-8"
+                )
+                out1 = sh(
+                    PY,
+                    str(ROOT / "one_episode.py"),
+                    "--entry-file",
+                    str(entry_path),
+                    env=env,
+                )
         except subprocess.CalledProcessError as exc:
             output_text = getattr(exc, "output", "") or ""
             if not isinstance(output_text, str):

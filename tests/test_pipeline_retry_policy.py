@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 import subprocess
 import sys
@@ -260,7 +261,15 @@ def test_main_fails_when_entry_reaches_retry_limit(
         lambda command_name: f"/usr/bin/{command_name}",
     )
 
+    handed_off_paths: list[pathlib.Path] = []
+
     def fake_sh(*args: object, env=None, cwd=None) -> str:
+        assert args[2] == "--entry-file"
+        path = pathlib.Path(str(args[3]))
+        handed_off_paths.append(path)
+        prepared = json.loads(path.read_text(encoding="utf-8"))
+        assert prepared["article_link"] == "https://example.com/article"
+        assert prepared["article_summary_html"] == "<p>Summary</p>"
         raise subprocess.CalledProcessError(1, [str(arg) for arg in args], "tts failed")
 
     monkeypatch.setattr(pipeline, "sh", fake_sh)
@@ -273,6 +282,8 @@ def test_main_fails_when_entry_reaches_retry_limit(
         )
     else:
         raise AssertionError("Expected SystemExit when retries are exhausted")
+    assert len(handed_off_paths) == 1
+    assert not handed_off_paths[0].exists()
 
 
 def test_main_skips_retry_exhausted_entry_on_scheduled_run(
