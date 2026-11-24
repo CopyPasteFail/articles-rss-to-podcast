@@ -352,6 +352,9 @@ To promote an image:
 3. Run the podcast workflow manually and inspect the result. Restore the previous
    digest to roll back an image update.
 
+For Python or Node base-image updates, update the digest pins in `Dockerfile`
+before rebuilding. A manual build alone keeps those pinned base versions.
+
 The podcast job authenticates GHCR pulls with its built-in `GITHUB_TOKEN`, so the
 image does not require a separate registry account or a personal access token.
 Keep the package linked to this repository so its workflows can pull it.
