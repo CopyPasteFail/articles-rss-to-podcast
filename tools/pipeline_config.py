@@ -73,6 +73,7 @@ class GitHubConfig:
     workflow_file: str
     branch_ref: str
     environment_name: str
+    runtime_image: str | None = None
 
 
 @dataclass(frozen=True)
@@ -611,10 +612,20 @@ def _validate_github_config(
             "github.environment must be a non-empty string when provided."
         )
 
+    runtime_image = _read_optional_string(raw_github, "runtime_image")
+    if runtime_image is not None and not re.fullmatch(
+        r"ghcr\.io/[a-z0-9._/-]+@sha256:[0-9a-f]{64}", runtime_image
+    ):
+        raise PipelineConfigError(
+            "github.runtime_image must be an immutable GHCR image reference "
+            "ending in @sha256:<64 lowercase hex characters>."
+        )
+
     return GitHubConfig(
         workflow_file=workflow_path_string,
         branch_ref=branch_ref,
         environment_name=environment_name.strip(),
+        runtime_image=runtime_image,
     )
 
 

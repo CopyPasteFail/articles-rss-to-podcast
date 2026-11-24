@@ -1,0 +1,66 @@
+name: Runtime image
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - requirements.txt
+      - package.json
+      - package-lock.json
+      - tools/smoke_runtime.py
+      - .github/workflows/runtime-image.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-test-publish:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build dependency-only image
+        id: image
+        shell: bash
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/articles-rss-to-podcast-runtime:sha-${GITHUB_SHA}"
+          echo "tag=$image" >> "$GITHUB_OUTPUT"
+          docker build --platform linux/amd64 --pull --tag "$image" .
+
+      - name: Check runtime without network or credentials
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          docker run --rm --network none \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/workspace,readonly" \
+            --workdir /workspace --env CI=true \
+            "$IMAGE_TAG" python -m tools.smoke_runtime
+
+      - name: Publish tested image to GHCR
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE_TAG"
+          image_digest="$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE_TAG")"
+          docker pull "$image_digest"
+          {
+            echo '### Tested podcast runtime'
+            printf 'Image: `%s`\n' "$image_digest"
+            echo 'Imports, Node/Wrangler startup, FFmpeg/ffprobe, and MP3 normalization passed.'
+            echo 'No Actions artifacts or persistent Docker build cache were uploaded.'
+          } >> "$GITHUB_STEP_SUMMARY"

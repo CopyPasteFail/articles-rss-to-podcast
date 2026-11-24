@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import pathlib
+from dataclasses import replace
 
 import pytest
+import yaml
 
 from tools.generate_workflow import generate_workflow_yaml
 from tools.pipeline_config import (
     GitHubConfig,
     GoogleConfig,
     PipelineConfig,
+    PipelineConfigError,
     ScheduleConfig,
+    load_pipeline_config,
 )
 from tools.setup_github_environment import (
     build_environment_variable_values,
@@ -206,7 +210,89 @@ def test_generate_workflow_yaml_installs_ffmpeg() -> None:
     workflow_yaml = generate_workflow_yaml(build_pipeline_config())
 
     assert "Install Audio Dependencies" in workflow_yaml
-    assert "sudo apt-get update && sudo apt-get install -y ffmpeg" in workflow_yaml
+    assert "command -v ffmpeg" in workflow_yaml
+    assert "sudo apt-get install -y --no-install-recommends ffmpeg" in workflow_yaml
+
+
+def test_container_workflow_uses_pinned_runtime_without_install_steps() -> None:
+    config = build_pipeline_config()
+    image = "ghcr.io/copypastefail/podcast-runtime@sha256:" + "1" * 64
+    config = replace(config, github=replace(config.github, runtime_image=image))
+    workflow = yaml.safe_load(generate_workflow_yaml(config))
+    job = workflow["jobs"]["run-pipeline"]
+
+    assert job["container"]["image"] == image
+    assert job["container"]["credentials"]["password"] == "${{ secrets.GITHUB_TOKEN }}"
+    assert job["defaults"]["run"]["shell"] == "bash"
+    assert job["timeout-minutes"] == 60
+    assert workflow["permissions"]["packages"] == "read"
+    assert workflow["concurrency"]["cancel-in-progress"] is False
+    steps = job["steps"]
+    assert any(step.get("uses") == "google-github-actions/auth@v3" for step in steps)
+    assert not any("setup-python" in step.get("uses", "") for step in steps)
+    assert not any("setup-node" in step.get("uses", "") for step in steps)
+    assert not any("upload-artifact" in step.get("uses", "") for step in steps)
+    assert not any(
+        command in step.get("run", "")
+        for step in steps
+        for command in ("pip install", "apt-get", "npm ci")
+    )
+
+
+def test_committed_podcast_workflow_matches_generator() -> None:
+    root = pathlib.Path(__file__).resolve().parents[1]
+    config = load_pipeline_config(root, pipeline_id="geektime-he")
+    assert (root / config.github.workflow_file).read_text(encoding="utf-8") == (
+        generate_workflow_yaml(config)
+    )
+
+
+def test_runtime_workflows_do_not_upload_actions_artifacts() -> None:
+    root = pathlib.Path(__file__).resolve().parents[1]
+    for name in ("runtime-image.yml", "geektime-he.yml"):
+        workflow = yaml.safe_load((root / ".github/workflows" / name).read_text())
+        for job in workflow["jobs"].values():
+            for step in job["steps"]:
+                action = step.get("uses", "")
+                assert not action.startswith("actions/upload-artifact@")
+                if action.startswith("docker/build-push-action@"):
+                    env = workflow.get("env", {}) | step.get("env", {})
+                    assert str(env.get("DOCKER_BUILD_RECORD_UPLOAD")).lower() == "false"
+                assert "cache-to: type=gha" not in step.get("run", "")
+
+
+@pytest.mark.parametrize(
+    "image",
+    [
+        "ghcr.io/owner/runtime:latest",
+        "ghcr.io/owner/runtime@sha256:short",
+        "ghcr.io/owner/runtime@sha256:" + "G" * 64,
+    ],
+)
+def test_config_rejects_unpinned_runtime_images(
+    tmp_path: pathlib.Path, image: str
+) -> None:
+    pipeline_dir = tmp_path / "pipelines"
+    pipeline_dir.mkdir()
+    config = {
+        "pipeline_id": "example",
+        "feed_slug": "example",
+        "feed_env_file": "configs/example.env",
+        "schedule": {
+            "timezone": "UTC",
+            "interval_hours": 2,
+            "window_start": "00:00",
+            "window_end": "24:00",
+        },
+        "github": {
+            "workflow_file": ".github/workflows/example.yml",
+            "branch_ref": "refs/heads/main",
+            "runtime_image": image,
+        },
+    }
+    (pipeline_dir / "example.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+    with pytest.raises(PipelineConfigError, match="immutable GHCR image"):
+        load_pipeline_config(tmp_path, pipeline_id="example")
 
 
 def test_generate_workflow_yaml_masks_google_auth_metadata() -> None:

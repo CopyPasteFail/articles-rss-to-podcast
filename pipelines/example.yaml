@@ -12,6 +12,8 @@ github:
   workflow_file: .github/workflows/example-pipeline.yml
   branch_ref: refs/heads/main
   environment: example-pipeline
+  # Optional dependency-only image. Copy the tested digest from Runtime image's summary.
+  # runtime_image: ghcr.io/owner/podcast-runtime@sha256:<64-character-digest>
 
 failure_email:
   transport: smtp

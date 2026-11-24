@@ -11,12 +11,26 @@ on:
 permissions:
   contents: read
   id-token: write
+  packages: read
+
+concurrency:
+  group: geektime-he-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   run-pipeline:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment: geektime-he
+    timeout-minutes: 60
+    container:
+      image: 'ghcr.io/copypastefail/articles-rss-to-podcast-runtime@sha256:e41dc03c1ef1b591be8109a988d562edcd686e9f104c5ad829b411b204d58311'
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v5
 
@@ -39,24 +53,6 @@ jobs:
           service_account: '${{ vars.GCP_SERVICE_ACCOUNT_EMAIL }}'
           create_credentials_file: true
           export_environment_variables: true
-
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.13'
-
-      - name: Install Python dependencies
-        run: pip install -r requirements.txt
-
-      - name: Install Audio Dependencies
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install Node dependencies
-        run: npm ci
 
       - name: Run selected pipeline
         id: run_pipeline
@@ -89,10 +85,15 @@ jobs:
             echo "### Pipeline failure"
             echo ""
             echo "- Pipeline: geektime-he"
-            echo "- Exit code: ${{ steps.run_pipeline.outputs.exit_code }}"
+            echo "- Exit code: ${{ steps.run_pipeline.outputs.exit_code || 'not started' }}"
             echo "- Log file: ${{ steps.run_pipeline.outputs.log_file }}"
             echo ""
             echo '```text'
-            tail -n 80 "${{ steps.run_pipeline.outputs.log_file }}" || true
+            log_file="${{ steps.run_pipeline.outputs.log_file }}"
+            if [[ -n "$log_file" && -f "$log_file" ]]; then
+              tail -n 80 "$log_file"
+            else
+              echo "The pipeline did not start. See the failed setup step."
+            fi
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
